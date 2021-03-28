@@ -139,3 +139,12 @@ class Mouse:
 
     def corner_top_left(self):
         self.position = 1, 1
+
+    def _click(self, button: str, n_clicks: int, **kwargs):
+        pyautogui.click(*self.position, button=button, clicks=n_clicks, **kwargs)
+
+    def click_left(self, n_clicks=1, **kwargs):
+        self._click('left', n_clicks=n_clicks, **kwargs)
+
+    def click_right(self, n_clicks=1, **kwargs):
+        self._click('right', n_clicks=n_clicks, **kwargs)
