@@ -2,8 +2,8 @@
 
 It looks like magic
 
-![Tests](https://github.com/cereja-project/calango/workflows/Python%20Tests/badge.svg)
-![PyPi Publish](https://github.com/cereja-project/calango/workflows/PyPi%20Publish/badge.svg)
+![Tests](https://github.com/cereja-project/calango/workflows/Python%20package/badge.svg)
+![PyPi Publish](https://github.com/cereja-project/calango/workflows/Upload%20Python%20Package/badge.svg)
 [![PyPI version](https://badge.fury.io/py/calango.svg)](https://badge.fury.io/py/calango)
 
 ## Get started
