@@ -1,4 +1,4 @@
-# magic
+# Magic Project
 
 It looks like magic
 
