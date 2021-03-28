@@ -1,25 +1,25 @@
-# Magic Project
+# Calango Project
 
 It looks like magic
 
-![Tests](https://github.com/cereja-project/magic/workflows/Python%20Tests/badge.svg)
-![PyPi Publish](https://github.com/cereja-project/magic/workflows/PyPi%20Publish/badge.svg)
-[![PyPI version](https://badge.fury.io/py/magic.svg)](https://badge.fury.io/py/magic)
+![Tests](https://github.com/cereja-project/calango/workflows/Python%20Tests/badge.svg)
+![PyPi Publish](https://github.com/cereja-project/calango/workflows/PyPi%20Publish/badge.svg)
+[![PyPI version](https://badge.fury.io/py/calango.svg)](https://badge.fury.io/py/calango)
 
 ## Get started
 
 Install with pip
 
-`pip install magic`
+`pip install calango`
 
 or
 
-`python -m pip install magic`
+`python -m pip install calango`
 
 ## Mouse Interface
 
 ```python
-from magic.devices import VideoCapture, Mouse
+from calango.devices import Mouse
 
 mouse = Mouse()
 
@@ -33,7 +33,7 @@ print(mouse.position)  # return current postion
 ## Camera Interface
 
 ```python
-from magic.devices import Capture
+from calango.devices import Capture
 import cv2
 
 cam = Capture()
@@ -47,7 +47,7 @@ cam.stop()
 
 # You can use out while context
 frame = cam.frame  # current frame numpy array
-cv2.imwrite('magic.png', frame)
+cv2.imwrite('calango.png', frame)
 cam.stop()  # stop capture
 
 ```

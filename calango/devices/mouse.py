@@ -79,7 +79,6 @@ class Mouse:
     def _move(self, x, y):
         if self._reduce_noise:
             distance = cj.mathtools.distance_between_points((x, y), self._last_position or self.position)
-            print('distance', distance)
             if distance <= self._noise_threshold:
                 return
         self._last_position = self.position

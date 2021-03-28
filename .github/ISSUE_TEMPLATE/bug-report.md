@@ -1,15 +1,15 @@
 ---
 name: "\U0001F41B Bug report"
-about: Magic a report to help us improve
+about: Calango a report to help us improve
 
 ---
 
 <!--
-Thank you for reporting a possible bug in Magic.
+Thank you for reporting a possible bug in Calango.
 
 Please fill in as much of the template below as you can.
 
-Version: output of `magic.VERSION`
+Version: output of `calango.VERSION`
 Platform: output of `uname -a` (UNIX), or version and 32 or 64-bit (Windows)
 
 If possible, please provide code that demonstrates the problem, keeping it as

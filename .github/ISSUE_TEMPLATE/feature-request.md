@@ -5,7 +5,7 @@ about: Suggest an idea for this project
 ---
 
 <!--
-Thank you for suggesting an idea to make Magic better.
+Thank you for suggesting an idea to make Calango better.
 
 Please fill in as much of the template below as you're able.
 -->
