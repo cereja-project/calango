@@ -24,13 +24,19 @@ SOFTWARE.
 from typing import Tuple, Union
 import cereja as cj
 
-import pyautogui
+try:
+    import pyautogui
+
+    pyautogui_available = True
+except:
+    pyautogui_available = False
 
 __all__ = ['Mouse']
 
 
 class Mouse:
     def __init__(self, jump=5, reduce_noise=True, noise_threshold=3):
+        assert pyautogui_available, "invalid environment"
         self._jump = jump
         self._last_position = None
         self._reduce_noise = reduce_noise
