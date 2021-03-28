@@ -23,10 +23,10 @@ SOFTWARE.
 """
 import cv2
 
-__all__ = ['VideoCapture']
+__all__ = ['Capture']
 
 
-class VideoCapture:
+class Capture:
     def __init__(self, *args, take_rgb=False, flip=False, **kwargs):
         self._args = args
         self._kwargs = kwargs
@@ -35,7 +35,7 @@ class VideoCapture:
         self._flip = flip
 
     def _cv2_cap(self):
-        return cv2.VideoCapture(*self._args, cv2.CAP_DSHOW, **self._kwargs)
+        return cv2.VideoCapture(0, *self._args, cv2.CAP_DSHOW, **self._kwargs)
 
     @property
     def cap(self):
