@@ -22,8 +22,6 @@ jobs:
         TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
-        echo "DISPLAY=:0" >> ~/.bashrc
-        source ~/.bashrc
         python -m pip install -r requirements.txt
         python setup.py sdist bdist_wheel
         twine upload dist/*

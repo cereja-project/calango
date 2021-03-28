@@ -1,3 +1,7 @@
+import os
+
+if 'DISPLAY' not in os.environ:
+    os.environ['DISPLAY'] = ':0'
 try:
     # noinspection PyUnresolvedReferences
     IPYTHON = get_ipython()
