@@ -35,7 +35,7 @@ class Capture:
         self._flip = flip
 
     def _cv2_cap(self):
-        return cv2.VideoCapture(0, *self._args, cv2.CAP_DSHOW, **self._kwargs)
+        return cv2.VideoCapture(*self._args)
 
     @property
     def cap(self):
