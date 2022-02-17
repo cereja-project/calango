@@ -29,32 +29,64 @@ __all__ = ['Capture']
 class Capture:
     def __init__(self, *args, take_rgb=False, flip=False, **kwargs):
         self._args = args
+        self._is_file = bool(self._args and isinstance(self._args[0], str))
         self._kwargs = kwargs
         self._cap = self._cv2_cap()
         self._take_rgb = take_rgb
         self._flip = flip
+        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self._width, self._height = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(
+                self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self._fps = int(self._cap.get(cv2.CAP_PROP_FPS))
+        self._current_frame = 0
 
     def _cv2_cap(self):
         return cv2.VideoCapture(*self._args)
 
     @property
+    def current_frame(self):
+        return self._current_frame
+
+    @property
+    def width(self):
+        return self._width
+
+    @property
+    def height(self):
+        return self._height
+
+    @property
+    def fps(self):
+        return self._fps
+
+    @property
+    def frame_count(self):
+        return self._frame_count
+
+    @property
+    def is_file(self):
+        return self._is_file
+
+    @property
     def cap(self):
-        if self.stopped:
+        if self.stopped and not self.is_file:
             self._cap.release()
             self._cap = self._cv2_cap()
         return self._cap
 
     @property
-    def frame(self):
-        while True:
-            success, image = self.cap.read()
+    def frames(self):
+        cap = self.cap
+        while (cap.isOpened() or not self.stopped) and (self._current_frame < self.frame_count or not self.is_file):
+            success, image = cap.read()
             if not success:
                 continue
             if self._flip:
                 image = cv2.flip(image, 1)
             if self._take_rgb:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            return image
+            self._current_frame += 1
+            yield image
 
     @property
     def stopped(self):
@@ -64,8 +96,8 @@ class Capture:
         self._cap.release()
 
     def __next__(self):
-        return self.frame
+        return next(self.__iter__())
 
     def __iter__(self):
-        for i in self.frame:
-            yield i
+        for frame in self.frames:
+            yield frame

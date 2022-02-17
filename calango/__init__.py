@@ -23,7 +23,7 @@ SOFTWARE.
 """
 from cereja.utils import get_version_pep440_compliant
 from . import settings
-from . import devices
+from .devices import Capture, Mouse
 
-VERSION = "1.0.3.final.0"
+VERSION = "1.0.4.final.0"
 __version__ = get_version_pep440_compliant(VERSION)
