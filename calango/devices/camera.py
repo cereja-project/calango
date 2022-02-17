@@ -22,6 +22,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import cv2
+import cereja as cj
 
 __all__ = ['Capture']
 
@@ -34,7 +35,7 @@ class Capture:
         self._cap = self._cv2_cap()
         self._take_rgb = take_rgb
         self._flip = flip
-        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self._is_file else 99999
         self._width, self._height = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(
                 self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self._fps = int(self._cap.get(cv2.CAP_PROP_FPS))
@@ -94,6 +95,18 @@ class Capture:
 
     def stop(self):
         self._cap.release()
+
+    def save_frames(self, p: str, start=1, end=None, step=1, img_format='png'):
+        filter_map = set(range(start, end or self.frame_count, step))
+        p = cj.Path(p)
+        size_number = len(str(self.frame_count))
+        max_frame = max(filter_map)
+        for frame in self:
+            prefix = cj.get_zero_mask(self.current_frame, size_number)
+            if self.current_frame in filter_map:
+                cv2.imwrite(p.join(f'{prefix}.{img_format}').path, frame)
+            if self.current_frame >= max_frame:
+                break
 
     def __next__(self):
         return next(self.__iter__())
