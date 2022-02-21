@@ -24,6 +24,7 @@ SOFTWARE.
 from cereja.utils import get_version_pep440_compliant
 from . import settings
 from .devices import Capture, Mouse
+from .media import Image
 
-VERSION = "1.0.5.final.0"
+VERSION = "1.0.6.final.0"
 __version__ = get_version_pep440_compliant(VERSION)

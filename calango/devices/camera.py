@@ -21,25 +21,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+import sys
+
 import cv2
 import cereja as cj
+from ..media import Image
 
 __all__ = ['Capture']
 
 
 class Capture:
     def __init__(self, *args, take_rgb=False, flip=False, **kwargs):
-        self._args = args
+        self._args = args or (0,)
         self._is_file = bool(self._args and isinstance(self._args[0], str))
         self._kwargs = kwargs
         self._cap = self._cv2_cap()
         self._take_rgb = take_rgb
         self._flip = flip
-        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self._is_file else 99999
+        # FIX frame count for webcam
+        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self._is_file else 999999
         self._width, self._height = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(
                 self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self._fps = int(self._cap.get(cv2.CAP_PROP_FPS))
         self._current_frame = 0
+        self._frames = self._generate_frames()
 
     def _cv2_cap(self):
         return cv2.VideoCapture(*self._args)
@@ -75,19 +80,31 @@ class Capture:
             self._cap = self._cv2_cap()
         return self._cap
 
-    @property
-    def frames(self):
+    def _generate_frames(self):
+        self._current_frame = 0
         cap = self.cap
         while (cap.isOpened() or not self.stopped) and (self._current_frame < self.frame_count or not self.is_file):
             success, image = cap.read()
             if not success:
                 continue
+            image = Image(image)
             if self._flip:
-                image = cv2.flip(image, 1)
+                image.flip()
             if self._take_rgb:
-                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                image.bgr_to_rgb()
             self._current_frame += 1
-            yield image
+            yield image.data
+        self.stop()
+
+    @property
+    def frames(self):
+        if self.stopped and not self.is_file:
+            self._frames = self._generate_frames()
+        return self._frames
+
+    @property
+    def frame(self):
+        return next(self.frames)
 
     @property
     def stopped(self):
