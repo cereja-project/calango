@@ -3,3 +3,4 @@ pyautogui
 opencv-python
 matplotlib
 numpy
+scipy
