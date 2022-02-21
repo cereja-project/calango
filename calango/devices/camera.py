@@ -137,9 +137,10 @@ class Capture:
 
 
 class VideoMagnify(Capture):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, size=(256, 256), **kwargs):
         super().__init__(*args, **kwargs)
         self.buffer_size = 40
+        self.size = size
 
     def build_gaussian_pyramid(self, src, level=3):
         s = src.copy()
@@ -205,7 +206,7 @@ class VideoMagnify(Capture):
                 continue
             image = Image(image)
             image.flip()
-            image.resize((256, 256), keep_scale=True)
+            image.resize(self.size, keep_scale=True)
             image = image.data
             data_buffer.append(image.copy())
             times.append(time.time() - t0)

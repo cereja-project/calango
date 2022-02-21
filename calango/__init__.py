@@ -26,5 +26,5 @@ from . import settings
 from .devices import Capture, Mouse, VideoMagnify
 from .media import Image
 
-VERSION = "1.0.7.final.0"
+VERSION = "1.0.8.final.0"
 __version__ = get_version_pep440_compliant(VERSION)
