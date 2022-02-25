@@ -61,18 +61,6 @@ class Image(_InterfaceImage):
     def data(self):
         return self._data
 
-    def bgr_to_rgb(self):
-        if self._channels == 'BGR':
-            self._data = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
-            self._channels = 'RGB'
-        return self
-
-    def rgb_to_bgr(self):
-        if self._channels == 'RGB':
-            self._data = cv2.cvtColor(self._data, cv2.COLOR_RGB2BGR)
-            self._channels = 'BGR'
-        return self
-
     def flip(self):
         self._data = cv2.flip(self._data, 1)
         return self
@@ -90,21 +78,29 @@ class Image(_InterfaceImage):
         return self._get_channel_data('B')
 
     @property
+    def shape(self):
+        return self.data.shape
+
+    @property
     def width(self) -> int:
-        return len(self.data)
+        return self.shape[1]
 
     @property
     def height(self) -> int:
-        return len(self.data)
+        return self.shape[0]
+
+    @property
+    def center(self) -> Tuple[int, int]:
+        return self.width // 2, self.height // 2
+
+    @property
+    def min_len(self):
+        return min(self._get_h_w(self.shape))
 
     @classmethod
     def _get_h_w(cls, shape):
         assert len(shape) >= 2, f'Image shape invalid. {shape}'
         return shape[:2]
-
-    @property
-    def shape(self) -> tuple:
-        return self.data.shape
 
     @classmethod
     def size_proportional(cls, original_shape, new_shape) -> Tuple[int, int]:
@@ -113,6 +109,18 @@ class Image(_InterfaceImage):
         if o_h < o_w:
             return n_w, math.floor(o_h / (o_w / n_w))
         return math.floor(o_w / (o_h / n_h)), n_h
+
+    def bgr_to_rgb(self):
+        if self._channels == 'BGR':
+            self._data = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
+            self._channels = 'RGB'
+        return self
+
+    def rgb_to_bgr(self):
+        if self._channels == 'RGB':
+            self._data = cv2.cvtColor(self._data, cv2.COLOR_RGB2BGR)
+            self._channels = 'BGR'
+        return self
 
     def resize(self, shape: Union[tuple, list], keep_scale: bool = False) -> Image:
         """
@@ -124,17 +132,13 @@ class Image(_InterfaceImage):
         self._data = cv2.resize(self.data, shape)
         return self
 
-    def rotate(self, degrees: int):
+    def rotate(self, degrees=90):
         assert degrees in (90, 180, -90), ValueError('send integer 90, -90 or 180')
         self._data = cv2.rotate(self.data, {90:  cv2.ROTATE_90_CLOCKWISE,
                                             -90: cv2.ROTATE_90_COUNTERCLOCKWISE,
                                             180: cv2.ROTATE_180
                                             }.get(degrees))
         return self
-
-    @property
-    def center(self) -> Tuple[int, int]:
-        return self.width // 2, self.height // 2
 
     def crop_by_center(self, size) -> Image:
         assert isinstance(size, (list, tuple)) and cj.is_numeric_sequence(size) and len(
@@ -156,13 +160,11 @@ class Image(_InterfaceImage):
         self._data = im_crop[start[1]:end[1], start[0]:end[0]]
         return self
 
-    def prune_shape(self, output_size):
-        min_len = min(self._get_h_w(output_size))
+    def prune(self):
+        min_len = self.min_len
         return self.crop_by_center((min_len, min_len))
 
     def show(self):
-        if self._channels == 'BGR':
-            img = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
         if ON_COLAB_JUPYTER:
             from google.colab.patches import cv2_imshow
             cv2_imshow(self.data)
