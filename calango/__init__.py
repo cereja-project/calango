@@ -23,7 +23,7 @@ SOFTWARE.
 """
 from cereja.utils import get_version_pep440_compliant
 from . import settings
-from .devices import Capture, Mouse, VideoMagnify
+from .devices import Capture, Mouse, VideoMagnify, VideoWriter
 from .media import Image
 
 VERSION = "1.0.8.final.0"

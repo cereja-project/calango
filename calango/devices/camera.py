@@ -29,8 +29,49 @@ import cereja as cj
 from ..media import Image
 import scipy.fftpack as fftpack
 import numpy as np
+import platform
 
-__all__ = ['Capture', 'VideoMagnify']
+__all__ = ['Capture', 'VideoMagnify', 'VideoWriter']
+
+
+class VideoWriter:
+    def __init__(self, p, width=None, height=None, fps=30):
+        self._fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        self._height, self._width = width, height
+        self._path = p
+        self.__writer = None
+        self._fps = fps
+        self._with_context = False
+
+    def add_frame(self, frame):
+        assert self._with_context, """Use with context eg.
+    with VideoWriter('path/to/video.avi', fps=30) as video:
+        video.write(frame)"""
+        if self._width is None or self._height is None:
+            self._height, self._width, _ = frame.shape
+        self._writer.write(frame)
+
+    @property
+    def _writer(self):
+        if self.__writer is None or not self.__writer.isOpened():
+            self.__writer = cv2.VideoWriter(self._path, self._fourcc, self._fps, (self._width, self._height), self._fps)
+        return self.__writer
+
+    @classmethod
+    def write_frames(cls, p, frames, fps=30, width=None, height=None):
+        with cls(p, width=width, height=height, fps=fps) as video:
+            for frame in frames:
+                if isinstance(frame, (str, cj.Path)):
+                    frame = cv2.imread(cj.Path(frame).path)
+                video.add_frame(frame)
+
+    def __enter__(self, *args, **kwargs):
+        self._with_context = True
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._with_context = False
+        self._writer.release()
 
 
 class Capture:
@@ -110,7 +151,10 @@ class Capture:
 
     @property
     def frame(self):
-        return next(self.frames)
+        try:
+            return next(self.frames)
+        except StopIteration:
+            return
 
     @property
     def stopped(self):
@@ -118,6 +162,7 @@ class Capture:
 
     def stop(self):
         self._cap.release()
+        cv2.destroyAllWindows()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='png'):
         filter_map = set(range(start, end or self.frame_count, step))
@@ -132,18 +177,27 @@ class Capture:
                 break
 
     def __next__(self):
-        return next(self.__iter__())
+        return self.frame
 
     def __iter__(self):
         for frame in self.frames:
             yield frame
 
+    def show(self):
+        while not self.stopped:
+            frame = self.frame
+            if frame is None:
+                break
+            cv2.imshow('Video', frame)
+            if cv2.waitKey(1) == ord('q'):
+                break
+        self.stop()
+
 
 class VideoMagnify(Capture):
-    def __init__(self, *args, preprocess_func=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.buffer_size = 40
-        self._preprocess_func = preprocess_func
 
     def build_gaussian_pyramid(self, src, level=3):
         s = src.copy()
@@ -207,8 +261,8 @@ class VideoMagnify(Capture):
             success, image = cap.read()
             if not success:
                 continue
-            if self._preprocess_func:
-                image = self._preprocess_func(image)
+            if self._frame_preprocess_func:
+                image = self._frame_preprocess_func(image)
             image = Image(image)
             image = image.data
             data_buffer.append(image.copy())
