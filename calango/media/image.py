@@ -107,8 +107,8 @@ class Image(_InterfaceImage):
         o_h, o_w = cls._get_h_w(original_shape)
         n_h, n_w = cls._get_h_w(new_shape)
         if o_h < o_w:
-            return n_w, math.floor(o_h / (o_w / n_w))
-        return math.floor(o_w / (o_h / n_h)), n_h
+            return math.floor(o_h / (o_w / n_w)), n_w
+        return n_h, math.floor(o_w / (o_h / n_h))
 
     def bgr_to_rgb(self):
         if self._channels == 'BGR':
