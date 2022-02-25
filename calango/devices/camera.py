@@ -34,8 +34,9 @@ __all__ = ['Capture', 'VideoMagnify']
 
 
 class Capture:
-    def __init__(self, *args, take_rgb=False, flip=False, **kwargs):
+    def __init__(self, *args, frame_preprocess_func=None, take_rgb=False, flip=False, **kwargs):
         self._args = args or (0,)
+        self._frame_preprocess_func = frame_preprocess_func
         self._is_file = bool(self._args and isinstance(self._args[0], str))
         self._kwargs = kwargs
         self._cap = self._cv2_cap()
@@ -90,6 +91,8 @@ class Capture:
             success, image = cap.read()
             if not success:
                 continue
+            if self._frame_preprocess_func:
+                image = self._frame_preprocess_func(image)
             image = Image(image)
             if self._flip:
                 image.flip()
@@ -137,10 +140,10 @@ class Capture:
 
 
 class VideoMagnify(Capture):
-    def __init__(self, *args, size=(256, 256), **kwargs):
+    def __init__(self, *args, preprocess_func=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.buffer_size = 40
-        self.size = size
+        self._preprocess_func = preprocess_func
 
     def build_gaussian_pyramid(self, src, level=3):
         s = src.copy()
@@ -204,9 +207,9 @@ class VideoMagnify(Capture):
             success, image = cap.read()
             if not success:
                 continue
+            if self._preprocess_func:
+                image = self._preprocess_func(image)
             image = Image(image)
-            image.flip()
-            image.resize(self.size, keep_scale=True)
             image = image.data
             data_buffer.append(image.copy())
             times.append(time.time() - t0)
@@ -220,6 +223,7 @@ class VideoMagnify(Capture):
 
             if len(data_buffer) > self.buffer_size - 1:
                 self._fps = float(len(data_buffer)) / (times[-1] - times[0])
-                yield cv2.convertScaleAbs(self.magnify_color(data_buffer=np.array(data_buffer).astype('float'), fps=self._fps)).copy()
+                yield cv2.convertScaleAbs(
+                        self.magnify_color(data_buffer=np.array(data_buffer).astype('float'), fps=self._fps)).copy()
 
         self.stop()

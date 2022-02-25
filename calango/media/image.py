@@ -11,6 +11,14 @@ import numpy as np
 
 __all__ = ['Image']
 
+try:
+    # noinspection PyUnresolvedReferences
+    IPYTHON = get_ipython()
+    ON_COLAB_JUPYTER = True if "google.colab" in IPYTHON.__str__() else False
+except NameError:
+    IPYTHON = None
+    ON_COLAB_JUPYTER = False
+
 
 class _InterfaceImage(ABC):
 
@@ -24,10 +32,6 @@ class _InterfaceImage(ABC):
     def height(self) -> int:
         pass
 
-    @abstractmethod
-    def read(self, p, flags):
-        pass
-
     @property
     @abstractmethod
     def data(self):
@@ -36,12 +40,13 @@ class _InterfaceImage(ABC):
 
 class Image(_InterfaceImage):
 
-    def __init__(self, image_or_path: Union[str, np.ndarray], channels='BGR', **kwargs):
+    def __init__(self, image_or_path: Union[str, np.ndarray], channels='BGR'):
         self._path = None
         assert isinstance(channels, str), f'channels {channels} is not valid.'
         if isinstance(image_or_path, str):
             self._path = cj.Path(image_or_path)
-            self._data = self.read(self._path.path, **kwargs)
+            assert self._path.exists, FileNotFoundError(f'Image {self._path.path} not found.')
+            self._data = cv2.imread(self._path.path)
             self._channels = 'BGR'
         else:
             assert isinstance(image_or_path, np.ndarray) and len(image_or_path.shape) == 3, 'Image format is invalid'
@@ -57,13 +62,15 @@ class Image(_InterfaceImage):
         return self._data
 
     def bgr_to_rgb(self):
-        self._data = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
-        self._channels = 'RGB'
+        if self._channels == 'BGR':
+            self._data = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
+            self._channels = 'RGB'
         return self
 
     def rgb_to_bgr(self):
-        self._data = cv2.cvtColor(self._data, cv2.COLOR_RGB2BGR)
-        self._channels = 'BGR'
+        if self._channels == 'RGB':
+            self._data = cv2.cvtColor(self._data, cv2.COLOR_RGB2BGR)
+            self._channels = 'BGR'
         return self
 
     def flip(self):
@@ -117,6 +124,14 @@ class Image(_InterfaceImage):
         self._data = cv2.resize(self.data, shape)
         return self
 
+    def rotate(self, degrees: int):
+        assert degrees in (90, 180, -90), ValueError('send integer 90, -90 or 180')
+        self._data = cv2.rotate(self.data, {90:  cv2.ROTATE_90_CLOCKWISE,
+                                            -90: cv2.ROTATE_90_COUNTERCLOCKWISE,
+                                            180: cv2.ROTATE_180
+                                            }.get(degrees))
+        return self
+
     @property
     def center(self) -> Tuple[int, int]:
         return self.width // 2, self.height // 2
@@ -141,23 +156,26 @@ class Image(_InterfaceImage):
         self._data = im_crop[start[1]:end[1], start[0]:end[0]]
         return self
 
-    def prune_shape(self, image):
-        h, w, _ = image.shape
-        min_len = min((h, w))
+    def prune_shape(self, output_size):
+        min_len = min(self._get_h_w(output_size))
         return self.crop_by_center((min_len, min_len))
 
     def show(self):
-        cv2.imshow(f'HxW:{self.shape}', self.data)
+        if self._channels == 'BGR':
+            img = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
+        if ON_COLAB_JUPYTER:
+            from google.colab.patches import cv2_imshow
+            cv2_imshow(self.data)
+        else:
+            if self._channels == 'BGR':
+                plt.imshow(cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB))
+            else:
+                plt.imshow(self.data)
+            plt.show()
 
     def save(self, p: str):
         cv2.imwrite(p, self.data)
         assert cj.Path(p).exists, f'Error saving image {p}'
-
-    @classmethod
-    def read(cls, p, flags=None):
-        p = cj.Path(p)
-        assert p.exists, FileNotFoundError(f'Image {p.path} not found.')
-        return cv2.imread(p.path, flags)
 
     def plot_colors_histogram(self):
         # tuple to select colors of each channel line
