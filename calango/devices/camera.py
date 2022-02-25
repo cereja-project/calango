@@ -74,6 +74,17 @@ class VideoWriter:
         self._writer.release()
 
 
+class _VideoView:
+    def __init__(self, cap: 'Capture'):
+        self._cap = cap
+
+    def __enter__(self, *args, **kwargs):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._cap.stop()
+
+
 class Capture:
     def __init__(self, *args, frame_preprocess_func=None, take_rgb=False, flip=False, **kwargs):
         self._args = args or (0,)
@@ -184,14 +195,14 @@ class Capture:
             yield frame
 
     def show(self):
-        while not self.stopped:
-            frame = self.frame
-            if frame is None:
-                break
-            cv2.imshow('Video', frame)
-            if cv2.waitKey(1) == ord('q'):
-                break
-        self.stop()
+        with _VideoView(self):
+            while not self.stopped:
+                frame = self.frame
+                if frame is None:
+                    break
+                cv2.imshow('Video', frame)
+                if cv2.waitKey(1) == ord('q'):
+                    break
 
 
 class VideoMagnify(Capture):
@@ -252,6 +263,7 @@ class VideoMagnify(Capture):
         return self.reconstract_frame(amplified_video, data_buffer, levels=levels)
 
     def _generate_frames(self):
+        # TODO: create context control
         self._current_frame = 0
         cap = self.cap
         data_buffer = []
