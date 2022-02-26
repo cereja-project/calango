@@ -139,20 +139,20 @@ class Capture:
     def _generate_frames(self):
         self._current_frame = 0
         cap = self.cap
-        while (cap.isOpened() or not self.stopped) and (self._current_frame < self.frame_count or not self.is_file):
-            success, image = cap.read()
-            if not success:
-                continue
-            if self._frame_preprocess_func:
-                image = self._frame_preprocess_func(image)
-            image = Image(image)
-            if self._flip:
-                image.flip()
-            if self._take_rgb:
-                image.bgr_to_rgb()
-            self._current_frame += 1
-            yield image.data
-        self.stop()
+        with _VideoView(self):
+            while not self.stopped:
+                success, image = cap.read()
+                if not success:
+                    continue
+                if self._frame_preprocess_func:
+                    image = self._frame_preprocess_func(image)
+                image = Image(image)
+                if self._flip:
+                    image.flip()
+                if self._take_rgb:
+                    image.bgr_to_rgb()
+                self._current_frame += 1
+                yield image.data
 
     @property
     def frames(self):
@@ -169,7 +169,7 @@ class Capture:
 
     @property
     def stopped(self):
-        return not self._cap.isOpened()
+        return not (self._cap.isOpened() and (self._current_frame < self.frame_count or not self.is_file))
 
     def stop(self):
         self._cap.release()
@@ -244,12 +244,12 @@ class VideoMagnify(Capture):
         return np.abs(iff)
 
     @classmethod
-    def amplify_video(cls, gaussian_vid, amplification=70):
+    def amplify_video(cls, gaussian_vid, amplification=30):
         return gaussian_vid * amplification
 
     @classmethod
     def reconstract_frame(cls, amp_video, origin_video, levels=3):
-        img = amp_video[-1]
+        img = amp_video[-1].copy()
         while levels >= 1:
             img = cv2.pyrUp(img)
             levels -= 1
@@ -263,33 +263,31 @@ class VideoMagnify(Capture):
         return self.reconstract_frame(amplified_video, data_buffer, levels=levels)
 
     def _generate_frames(self):
-        # TODO: create context control
         self._current_frame = 0
         cap = self.cap
         data_buffer = []
         times = []
         t0 = time.time()
-        while (cap.isOpened() or not self.stopped) and (self._current_frame < self.frame_count or not self.is_file):
-            success, image = cap.read()
-            if not success:
-                continue
-            if self._frame_preprocess_func:
-                image = self._frame_preprocess_func(image)
-            image = Image(image)
-            image = image.data
-            data_buffer.append(image.copy())
-            times.append(time.time() - t0)
-            L = len(data_buffer)
-            self._current_frame += 1
-            if L < self.buffer_size:
-                yield image
-            if L > self.buffer_size:
-                data_buffer = data_buffer[-self.buffer_size:]
-                times = times[-self.buffer_size:]
+        with _VideoView(self):
+            while not self.stopped:
+                success, image = cap.read()
+                if not success:
+                    continue
+                if self._frame_preprocess_func:
+                    image = self._frame_preprocess_func(image)
+                image = Image(image)
+                image = image.data
+                data_buffer.append(image.copy())
+                times.append(time.time() - t0)
+                L = len(data_buffer)
+                self._current_frame += 1
+                if L < self.buffer_size:
+                    yield image
+                if L > self.buffer_size:
+                    data_buffer = data_buffer[-self.buffer_size:]
+                    times = times[-self.buffer_size:]
 
-            if len(data_buffer) > self.buffer_size - 1:
-                self._fps = float(len(data_buffer)) / (times[-1] - times[0])
-                yield cv2.convertScaleAbs(
-                        self.magnify_color(data_buffer=np.array(data_buffer).astype('float'), fps=self._fps)).copy()
-
-        self.stop()
+                if len(data_buffer) > self.buffer_size - 1:
+                    self._fps = float(len(data_buffer)) / (times[-1] - times[0])
+                    yield cv2.convertScaleAbs(
+                            self.magnify_color(data_buffer=np.array(data_buffer).astype('float'), fps=self._fps)).copy()
