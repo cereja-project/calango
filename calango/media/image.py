@@ -209,6 +209,7 @@ class Image(_InterfaceImage):
                   text_color_bg=(0, 0, 0)
                   ):
 
+        text = str(text)
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         k = int(min((self.width, self.height)) * 0.05)
         pos = {'left_top':      (k, k),
