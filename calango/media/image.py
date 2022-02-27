@@ -200,6 +200,33 @@ class Image(_InterfaceImage):
 
         plt.show()
 
+    def draw_text(self, text,
+                  font=cv2.FONT_HERSHEY_PLAIN,
+                  pos='left_bottom',
+                  font_scale=1,
+                  font_thickness=1,
+                  text_color=(0, 255, 0),
+                  text_color_bg=(0, 0, 0)
+                  ):
+
+        text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
+        k = int(min((self.width, self.height)) * 0.05)
+        pos = {'left_top':      (k, k),
+               'left_bottom':   (k, self.height - k*2),
+               'right_top':     ((self.width - text_size[0]) - k, k),
+               'right_bottom':  ((self.width - text_size[0]) - k, self.height - k*2),
+               'center_top':    (((self.width - text_size[0]//2) // 2 - k), k),
+               'center_bottom': (((self.width - text_size[0]//2) // 2 - k), self.height - k*2)
+               }.get(pos, (k, k))
+
+        x, y = pos
+
+        text_w, text_h = text_size
+        cv2.rectangle(self.data, pos, (x + text_w, y + text_h), text_color_bg, -1)
+        cv2.putText(self.data, text, (x, y + text_h + font_scale - 1), font, font_scale, text_color, font_thickness)
+
+        return self
+
     def gaussian_pyramid(self, levels=3, *args, **kwargs):
 
         img = self.data.copy()
