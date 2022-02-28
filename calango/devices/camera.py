@@ -21,7 +21,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-import sys
 import time
 
 import cv2
@@ -29,7 +28,6 @@ import cereja as cj
 from ..media import Image
 import scipy.fftpack as fftpack
 import numpy as np
-import platform
 
 __all__ = ['Capture', 'VideoMagnify', 'VideoWriter']
 
@@ -86,8 +84,10 @@ class _VideoView:
 
 
 class Capture:
-    def __init__(self, *args, frame_preprocess_func=None, take_rgb=False, flip=False, **kwargs):
+    def __init__(self, *args, show=False, draw=False, frame_preprocess_func=None, take_rgb=False, flip=False, **kwargs):
         self._args = args or (0,)
+        self._show = show
+        self._draw = draw
         self._frame_preprocess_func = frame_preprocess_func
         self._is_file = bool(self._args and isinstance(self._args[0], str))
         self._kwargs = kwargs
@@ -95,7 +95,7 @@ class Capture:
         self._take_rgb = take_rgb
         self._flip = flip
         # FIX frame count for webcam
-        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self._is_file else 999999
+        self._frame_count = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT)) if self._is_file else 1
         self._width, self._height = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(
                 self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self._fps = int(self._cap.get(cv2.CAP_PROP_FPS))
@@ -103,7 +103,22 @@ class Capture:
         self._frames = self._generate_frames()
 
     def _cv2_cap(self):
-        return cv2.VideoCapture(*self._args)
+        if self._is_file:
+            return cv2.VideoCapture(*self._args)
+        return cv2.VideoCapture(*self._args, cv2.CAP_DSHOW)
+
+    @property
+    def draw_info(self):
+        return f'FRAME: {self.current_frame} - FPS: {self.fps} ' \
+               f'- TIME: {round(time.time() - self._start_time)} seconds'
+
+    @property
+    def is_break_view(self) -> bool:
+        if self.is_file:
+            k = cv2.waitKey(int(self.frame_count // self.fps))
+        else:
+            k = cv2.waitKey(1)
+        return k == ord('q') or k == ord('\x1b')
 
     @property
     def current_frame(self):
@@ -119,11 +134,13 @@ class Capture:
 
     @property
     def fps(self):
-        return self._fps
+        if self._is_file:
+            return self._fps
+        return int(round(self.current_frame / (time.time() - self._start_time)))
 
     @property
     def frame_count(self):
-        return self._frame_count
+        return self._frame_count if self._is_file else self.current_frame + 1
 
     @property
     def is_file(self):
@@ -131,32 +148,35 @@ class Capture:
 
     @property
     def cap(self):
-        if self.stopped and not self.is_file:
+        if self.stopped:
             self._cap.release()
             self._cap = self._cv2_cap()
         return self._cap
 
     def _generate_frames(self):
         self._current_frame = 0
+        self._start_time = time.time()
         cap = self.cap
         with _VideoView(self):
             while not self.stopped:
                 success, image = cap.read()
-                if not success:
-                    continue
-                if self._frame_preprocess_func:
-                    image = self._frame_preprocess_func(image)
-                image = Image(image)
-                if self._flip:
-                    image.flip()
-                if self._take_rgb:
-                    image.bgr_to_rgb()
                 self._current_frame += 1
-                yield image.data
+                if not success and self._current_frame > self._frame_count:
+                    break
+                if image is None:
+                    continue
+                if self._show:
+                    cv2.imshow(f'Video {self.height}x{self.width}',
+                               Image(image.copy()).draw_text(
+                                       self.draw_info).data if self._draw else image.copy())
+
+                    if self.is_break_view:
+                        break
+                yield image
 
     @property
     def frames(self):
-        if self.stopped and not self.is_file:
+        if self.stopped:
             self._frames = self._generate_frames()
         return self._frames
 
@@ -169,16 +189,17 @@ class Capture:
 
     @property
     def stopped(self):
-        return not (self._cap.isOpened() and (self._current_frame < self.frame_count or not self.is_file))
+        return not self._cap.isOpened()
 
     def stop(self):
         self._cap.release()
         cv2.destroyAllWindows()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='png'):
-        filter_map = set(range(start, end or self.frame_count, step))
+        _frame_count = (self.frame_count if self.is_file else 99999)
+        filter_map = set(range(start, end or _frame_count, step))
         p = cj.Path(p)
-        size_number = len(str(self.frame_count))
+        size_number = len(str(_frame_count))
         max_frame = max(filter_map)
         for frame in self:
             prefix = cj.get_zero_mask(self.current_frame, size_number)
@@ -195,14 +216,15 @@ class Capture:
             yield frame
 
     def show(self):
-        with _VideoView(self):
-            while not self.stopped:
-                frame = self.frame
-                if frame is None:
-                    break
-                cv2.imshow('Video', frame)
-                if cv2.waitKey(1) == ord('q'):
-                    break
+        _show = self._show
+        _draw = self._draw
+        self._show = True
+        self._draw = True
+        for _ in self.frames:
+            pass
+
+        self._show = _show
+        self._draw = _draw
 
 
 class VideoMagnify(Capture):
