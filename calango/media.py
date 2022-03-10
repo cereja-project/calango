@@ -336,17 +336,6 @@ class VideoWriter:
         self._writer.release()
 
 
-class _VideoView:
-    def __init__(self, cap: 'Capture'):
-        self._cap = cap
-
-    def __enter__(self, *args, **kwargs):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._cap.stop()
-
-
 class _IVideo:
 
     @property
