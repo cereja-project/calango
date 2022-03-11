@@ -26,5 +26,5 @@ from . import settings
 from .devices import Mouse
 from .media import Image, VideoWriter, Video
 
-VERSION = "2.0.2.final.0"
+VERSION = "2.0.3.final.0"
 __version__ = get_version_pep440_compliant(VERSION)

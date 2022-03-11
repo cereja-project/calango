@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -312,7 +313,7 @@ class VideoWriter:
     @property
     def _writer(self):
         if self.__writer is None or not self.__writer.isOpened():
-            self.__writer = cv2.VideoWriter(self._path, self._fourcc, self._fps, (self._width, self._height), self._fps)
+            self.__writer = cv2.VideoWriter(self._path, self._fourcc, self._fps, (self._width, self._height))
         return self.__writer
 
     @classmethod
@@ -519,6 +520,7 @@ class Video:
         self._args = args
         self._kwargs = kwargs
         self._build()
+        self._th_show = None
 
     def _build(self):
         if len(self._args):
@@ -543,7 +545,7 @@ class Video:
 
         self._current_number_frame = 0
         self._start_time = None
-        self._th_show = threading.Thread(target=self._show)
+
         self._th_show_running = False
         self._last_frame = None
 
@@ -663,7 +665,13 @@ class Video:
         if ON_COLAB_JUPYTER:
             with cj.system.TempDir() as dir_path:
                 video_path = dir_path.path.join(f'{self._cap.name}.mp4')
-                self.save(video_path.path)
+                self.save_frames(dir_path.path)
+
+                subprocess.run(
+                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{len(str(self.total_frames))}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                ).check_returncode()
                 if video_path.exists:
                     return show_local_mp4(video_path.path)
                 raise Exception("Error on show video.")
@@ -672,6 +680,9 @@ class Video:
                 return
             if not self.is_opened:
                 self._build()
+            if self._th_show is not None:
+                self._th_show.join()
+            self._th_show = threading.Thread(target=self._show, daemon=True)
             self._th_show.start()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='jpg', limit_web_cam=500):
@@ -682,6 +693,8 @@ class Video:
         max_frame = max(filter_map)
         while self.current_number_frame < max_frame:
             frame = self.next_frame
+            if not self.is_opened:
+                break
             prefix = cj.get_zero_mask(self.current_number_frame, size_number)
             if self.current_number_frame in filter_map:
                 cv2.imwrite(p.join(f'{prefix}.{img_format}').path, frame)
