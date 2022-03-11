@@ -586,16 +586,18 @@ class Video:
                         self._cap = _VideoCV2(*self._args, **self._kwargs)
             elif isinstance(self._args[0], int):
                 self._cap = _VideoCV2(*self._args, **self._kwargs)
-            elif isinstance(self._args[0], (list, tuple)):
+            elif isinstance(self._args[0], (list, np.ndarray, Iterator)):
                 if len(self._args[0]) and isinstance(self._args[0][0], str):
                     self._cap = _FrameSequence.load_from_paths(self._args[0])
-            elif isinstance(self._args[0], (list, np.ndarray, Iterator)):
-                self._cap = _FrameSequence(self._args[0])
+                if isinstance(self._args[0], (list, np.ndarray, Iterator)):
+                    self._cap = _FrameSequence(self._args[0])
             else:
                 raise ValueError('Error on build Video. Arguments is invalid.')
         else:
             self._cap = _VideoCV2(*self._args, **self._kwargs)
 
+        assert hasattr(self, '_cap'), NotImplementedError(
+            f'Internal error. Please open new issue on https://github.com/cereja-project/calango')
         self._current_number_frame = 0
         self._start_time = None
 
