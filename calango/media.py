@@ -733,7 +733,7 @@ class Video:
                 self.save_frames(dir_path.path)
 
                 subprocess.run(
-                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{len(str(self.total_frames))}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
+                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{max(len(str(self.total_frames)), 3)}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
                         shell=True,
                         stdout=subprocess.PIPE,
                 ).check_returncode()
