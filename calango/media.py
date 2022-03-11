@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import math
 import threading
 import time
@@ -11,16 +10,11 @@ import cv2
 import cereja as cj
 from matplotlib import pyplot as plt
 import numpy as np
+from .settings import ON_COLAB_JUPYTER
 
 __all__ = ['Image', 'Video', 'VideoWriter']
 
-try:
-    # noinspection PyUnresolvedReferences
-    IPYTHON = get_ipython()
-    ON_COLAB_JUPYTER = True if "google.colab" in IPYTHON.__str__() else False
-except NameError:
-    IPYTHON = None
-    ON_COLAB_JUPYTER = False
+from .utils import show_local_mp4
 
 
 class _InterfaceImage(ABC):
@@ -247,6 +241,8 @@ class Image(_InterfaceImage):
         """
 
         text = str(text)
+        text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
+        font_scale = (self.width - (self.width * 0.2)) / text_size[0]
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         k = int(self.min_len * 0.03)
 
@@ -520,25 +516,31 @@ class Video:
 
     def __init__(self, *args, fps=None, **kwargs):
         kwargs['fps'] = fps
-        if len(args):
-            if isinstance(args[0], str):
-                path_ = cj.Path(args[0])
+        self._args = args
+        self._kwargs = kwargs
+        self._build()
+
+    def _build(self):
+        if len(self._args):
+            if isinstance(self._args[0], str):
+                path_ = cj.Path(self._args[0])
                 assert path_.exists, FileNotFoundError(f'{path_.path}')
                 if path_.is_dir:
                     self._cap = _FrameSequence.load_from_dir(path_)
                 else:
-                    self._cap = _VideoCV2(*args, **kwargs)
-            elif isinstance(args[0], int):
-                self._cap = _VideoCV2(*args, **kwargs)
-            elif isinstance(args[0], (list, tuple)):
-                if len(args[0]) and isinstance(args[0][0], str):
-                    self._cap = _FrameSequence.load_from_paths(args[0])
-            elif isinstance(args[0], (list, np.ndarray)):
-                self._cap = _FrameSequence(args[0])
+                    self._cap = _VideoCV2(*self._args, **self._kwargs)
+            elif isinstance(self._args[0], int):
+                self._cap = _VideoCV2(*self._args, **self._kwargs)
+            elif isinstance(self._args[0], (list, tuple)):
+                if len(self._args[0]) and isinstance(self._args[0][0], str):
+                    self._cap = _FrameSequence.load_from_paths(self._args[0])
+            elif isinstance(self._args[0], (list, np.ndarray)):
+                self._cap = _FrameSequence(self._args[0])
             else:
                 raise ValueError('Error on build Video. Arguments is invalid.')
         else:
-            self._cap = _VideoCV2(*args, **kwargs)
+            self._cap = _VideoCV2(*self._args, **self._kwargs)
+
         self._current_number_frame = 0
         self._start_time = None
         self._th_show = threading.Thread(target=self._show)
@@ -610,7 +612,7 @@ class Video:
             time_it = time.time() - self._start_time
             # need to take fps in video view
             wait_msec = self._cap.fps + int(
-                    round(abs(self.current_number_frame - time_it * self._cap.fps))) * self._cap.fps
+                    abs(self.current_number_frame - time_it * self._cap.fps)) * self._cap.fps
         else:
             wait_msec = 1
         k = cv2.waitKey(int(1000 // wait_msec))
@@ -645,10 +647,32 @@ class Video:
                 self._cap.stop()
         self._th_show_running = False
 
+    def get_frames(self):
+        if not self.is_opened:
+            self._build()
+        while self.is_opened:
+            frame = self.__get_next_frame()
+            if frame is None:
+                continue
+            yield frame
+
+    def save(self, file_path):
+        VideoWriter.write_frames(file_path, self.get_frames(), fps=self._cap.fps)
+
     def show(self):
-        if self._th_show_running:
-            return
-        self._th_show.start()
+        if ON_COLAB_JUPYTER:
+            with cj.system.TempDir() as dir_path:
+                video_path = dir_path.path.join(f'{self._cap.name}.mp4')
+                self.save(video_path.path)
+                if video_path.exists:
+                    return show_local_mp4(video_path.path)
+                raise Exception("Error on show video.")
+        else:
+            if self._th_show_running:
+                return
+            if not self.is_opened:
+                self._build()
+            self._th_show.start()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='jpg', limit_web_cam=500):
         _frame_count = (self.total_frames if not self._cap.is_webcam else limit_web_cam)
