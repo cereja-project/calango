@@ -693,8 +693,8 @@ class Video:
         max_frame = max(filter_map)
         while self.current_number_frame < max_frame:
             frame = self.next_frame
-            if not self.is_opened:
-                break
+            if frame is None:
+                continue
             prefix = cj.get_zero_mask(self.current_number_frame, size_number)
             if self.current_number_frame in filter_map:
                 cv2.imwrite(p.join(f'{prefix}.{img_format}').path, frame)
