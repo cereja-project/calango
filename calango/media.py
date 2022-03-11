@@ -7,10 +7,12 @@ import time
 from abc import ABC, abstractmethod
 from typing import Union, Tuple, Sequence, Iterator
 
-import cv2
 import cereja as cj
-from matplotlib import pyplot as plt
+import cv2
 import numpy as np
+from matplotlib import pyplot as plt
+
+from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
 
 __all__ = ['Image', 'Video', 'VideoWriter']
@@ -245,6 +247,7 @@ class Image(_InterfaceImage):
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         font_scale = (self.width - (self.width * 0.2)) / text_size[0]
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
+        text_size = text_size[0], int(text_size[1] * 1.5)
         k = int(self.min_len * 0.03)
 
         w_top_r_limit = (self.width - text_size[0]) - k
@@ -263,7 +266,7 @@ class Image(_InterfaceImage):
 
         text_w, text_h = text_size
         cv2.rectangle(self.data, pos, (x + text_w, y + text_h), text_color_bg, -1)
-        cv2.putText(self.data, text, (x, y + text_h), font, font_scale, text_color, font_thickness)
+        cv2.putText(self.data, text, (x, y + int(text_h * 0.9)), font, font_scale, text_color, font_thickness)
 
         return self
 
@@ -398,7 +401,7 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
         if fps is not None:
             assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
         else:
-            fps = int(round(self.get(cv2.CAP_PROP_FPS)))
+            fps = self.get(cv2.CAP_PROP_FPS)
         self._fps = fps
         self._total_frames = -1 if self._is_webcam else int(self.get(cv2.CAP_PROP_FRAME_COUNT))
         self._width, self._height = int(self.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -513,6 +516,53 @@ class _FrameSequence(_IVideo):
         self._is_opened = False
 
 
+class Screen(_IVideo):
+    def __init__(self, *args):
+        mouse = Mouse()
+
+        self._width, self._height = mouse.window_size
+        self._mon = {'left': 0, 'top': 0, 'width': self._width, 'height': self._height}
+        self._capture = True
+        self._frames = self.__get_frames()
+
+    @property
+    def width(self) -> int:
+        return self._width
+
+    @property
+    def height(self) -> int:
+        return self._height
+
+    @property
+    def next_frame(self) -> Tuple[bool, Union[np.ndarray, None]]:
+        return True, next(self._frames)
+
+    def __get_frames(self):
+        from mss import mss
+        with mss() as sct:
+            while self._capture:
+                yield Image(np.array(sct.grab(self._mon)), 'RGB').rgb_to_bgr().bgr_to_rgb().data
+
+    @property
+    def total_frames(self) -> int:
+        return -1
+
+    @property
+    def fps(self) -> Union[int, float]:
+        return 30
+
+    @property
+    def is_webcam(self) -> bool:
+        return True
+
+    @property
+    def is_opened(self) -> bool:
+        return self._capture
+
+    def stop(self):
+        self._capture = False
+
+
 class Video:
 
     def __init__(self, *args, fps=None, **kwargs):
@@ -525,18 +575,21 @@ class Video:
     def _build(self):
         if len(self._args):
             if isinstance(self._args[0], str):
-                path_ = cj.Path(self._args[0])
-                assert path_.exists, FileNotFoundError(f'{path_.path}')
-                if path_.is_dir:
-                    self._cap = _FrameSequence.load_from_dir(path_)
+                if self._args[0] == 'monitor':
+                    self._cap = Screen()
                 else:
-                    self._cap = _VideoCV2(*self._args, **self._kwargs)
+                    path_ = cj.Path(self._args[0])
+                    assert path_.exists, FileNotFoundError(f'{path_.path}')
+                    if path_.is_dir:
+                        self._cap = _FrameSequence.load_from_dir(path_)
+                    else:
+                        self._cap = _VideoCV2(*self._args, **self._kwargs)
             elif isinstance(self._args[0], int):
                 self._cap = _VideoCV2(*self._args, **self._kwargs)
             elif isinstance(self._args[0], (list, tuple)):
                 if len(self._args[0]) and isinstance(self._args[0][0], str):
                     self._cap = _FrameSequence.load_from_paths(self._args[0])
-            elif isinstance(self._args[0], (list, np.ndarray)):
+            elif isinstance(self._args[0], (list, np.ndarray, Iterator)):
                 self._cap = _FrameSequence(self._args[0])
             else:
                 raise ValueError('Error on build Video. Arguments is invalid.')
@@ -616,13 +669,13 @@ class Video:
             wait_msec = self._cap.fps + int(
                     abs(self.current_number_frame - time_it * self._cap.fps)) * self._cap.fps
         else:
-            wait_msec = 1
+            wait_msec = 1000
         k = cv2.waitKey(int(1000 // wait_msec))
         return k == ord('q') or k == ord('\x1b')
 
     @property
     def video_info(self):
-        return f"Size: {self._size_info} - FPS: {self._fps_info} - Frames: {self._frames_info} "
+        return f"Size: {self._size_info} - FPS: {self._fps_info} - Frames: {self._frames_info} T: {self._time_info}"
 
     @property
     def _size_info(self):
@@ -631,6 +684,10 @@ class Video:
     @property
     def _fps_info(self):
         return f'{cj.get_zero_mask(self.fps, max_len=3)}'
+
+    @property
+    def _time_info(self):
+        return f'{round(time.time() - self._start_time, 1)} s'
 
     @property
     def _frames_info(self):
@@ -649,17 +706,23 @@ class Video:
                 self._cap.stop()
         self._th_show_running = False
 
-    def get_frames(self):
+    def get_frames(self, n_frames=None):
         if not self.is_opened:
             self._build()
+
         while self.is_opened:
             frame = self.__get_next_frame()
             if frame is None:
                 continue
             yield frame
+            if n_frames is not None:
+                n_frames -= 1
+            if n_frames == 0:
+                self._cap.stop()
+                break
 
-    def save(self, file_path):
-        VideoWriter.write_frames(file_path, self.get_frames(), fps=self._cap.fps)
+    def save(self, file_path, n_frames=None):
+        VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps)
 
     def show(self):
         if ON_COLAB_JUPYTER:
@@ -698,3 +761,7 @@ class Video:
             prefix = cj.get_zero_mask(self.current_number_frame, size_number)
             if self.current_number_frame in filter_map:
                 cv2.imwrite(p.join(f'{prefix}.{img_format}').path, frame)
+
+    @property
+    def duration(self):
+        return self.total_frames / self._cap.fps
