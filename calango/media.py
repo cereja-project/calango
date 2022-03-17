@@ -104,6 +104,10 @@ class Image(_InterfaceImage):
     def min_len(self) -> int:
         return min(self._get_h_w(self.shape))
 
+    @property
+    def max_len(self) -> int:
+        return max(self._get_h_w(self.shape))
+
     @classmethod
     def _get_h_w(cls, shape):
         assert len(shape) >= 2, f'Image shape invalid. {shape}'
@@ -222,6 +226,28 @@ class Image(_InterfaceImage):
 
         plt.show()
 
+    def write_text(self, text,
+                   pos='left_bottom',
+                   font=cv2.FONT_HERSHEY_PLAIN,
+                   font_scale=1,
+                   font_thickness=1,
+                   text_color=(0, 255, 0),
+                   text_color_bg=(0, 0, 0)
+                   ) -> Image:
+        """
+        Write text on this Image and returns self.
+
+        :param text: a string
+        :param pos: region on write text in the image
+        :param font: cv2 font index. cv2.FONT_HERSHEY_PLAIN is default.
+        :param font_scale: size of font
+        :param font_thickness: thickness of font
+        :param text_color: BGR color
+        :param text_color_bg: BGR color
+        :return: Image
+        """
+        return self.draw_text(text, pos, font, font_scale, font_thickness, text_color, text_color_bg)
+
     def draw_text(self, text,
                   pos='left_bottom',
                   font=cv2.FONT_HERSHEY_PLAIN,
@@ -245,7 +271,7 @@ class Image(_InterfaceImage):
 
         text = str(text)
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
-        font_scale = (self.width - (self.width * 0.2)) / text_size[0]
+        font_scale = min((self.width - (self.width * 0.2)) / text_size[0], font_scale)
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         text_size = text_size[0], int(text_size[1] * 1.5)
         k = int(self.min_len * 0.03)
@@ -597,7 +623,7 @@ class Video:
             self._cap = _VideoCV2(*self._args, **self._kwargs)
 
         assert hasattr(self, '_cap'), NotImplementedError(
-            f'Internal error. Please open new issue on https://github.com/cereja-project/calango')
+                f'Internal error. Please open new issue on https://github.com/cereja-project/calango')
         self._current_number_frame = 0
         self._start_time = None
 
