@@ -683,9 +683,8 @@ class Video:
             frame = self.next_frame
             if frame is None:
                 continue
-            if len(batch_frames) < kernel_size:
-                batch_frames.append(frame if not take_number_frame else [self.current_number_frame, frame])
-            else:
+            batch_frames.append(frame if not take_number_frame else [self.current_number_frame, frame])
+            if len(batch_frames) == kernel_size:
                 yield batch_frames
                 batch_frames = batch_frames[strides:]
 
