@@ -4,12 +4,13 @@ import math
 import subprocess
 import threading
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import Union, Tuple, Sequence, Iterator
 
 import cereja as cj
 import cv2
 import numpy as np
+import logging
 from matplotlib import pyplot as plt
 
 from .devices import Mouse
@@ -20,57 +21,126 @@ __all__ = ['Image', 'Video', 'VideoWriter']
 from .utils import show_local_mp4
 
 
-class _InterfaceImage(ABC):
-
-    @property
-    @abstractmethod
-    def width(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def height(self) -> int:
-        pass
-
-    @property
-    @abstractmethod
-    def data(self):
-        pass
-
-
-class Image(_InterfaceImage):
+class Image(np.ndarray):
     _GRAY_SCALE = 'GRAY_SCALE'
     IMAGE_FORMATS = {'.jpg', '.jpeg', '.png'}
+    _color_mode = 'BGR'
 
-    def __init__(self, image_or_path: Union[str, np.ndarray], channels='BGR'):
-        self._path = None
-        assert isinstance(channels, str), f'channels {channels} is not valid.'
-        if isinstance(image_or_path, str):
-            self._path = cj.Path(image_or_path)
-            assert self._path.exists, FileNotFoundError(f'Image {self._path.path} not found.')
-            self._data = cv2.imread(self._path.path)
-            self._channels = 'BGR'
+    def __new__(cls, image_or_path: Union[str, np.ndarray], color_mode: str = 'BGR'):
+        if image_or_path is None:
+            data = np.zeros((480, 640, 3), dtype=np.uint8)
         else:
-            assert isinstance(image_or_path, np.ndarray) and len(image_or_path.shape) == 3, 'Image format is invalid'
-            self._data = image_or_path.copy()
-            if self.shape[-1] == 1:
-                self._channels = self._GRAY_SCALE
+            assert isinstance(color_mode, str), f'channels {color_mode} is not valid.'
+            if isinstance(image_or_path, str):
+                p = cj.Path(image_or_path)
+                assert p.exists, FileNotFoundError(f'Image {p.path} not found.')
+                data = cv2.imread(p.path)
+                color_mode = 'BGR'
             else:
-                self._channels = channels.upper()
+                assert isinstance(image_or_path, np.ndarray), 'image_or_path must be np.ndarray or str.'
+                data = image_or_path.copy()
+
+        if data.shape[-1] == 1 or len(data.shape) == 2:
+            color_mode = cls._GRAY_SCALE
+        elif data.shape[-1] == 4:
+            color_mode = 'BGRA'
+
+        color_mode = color_mode.upper()
+        assert color_mode in {'BGR', 'RGB', 'BGRA', 'GRAY_SCALE'}, f'channels {color_mode} is not valid.'
+        obj = super().__new__(cls, data.shape, dtype=data.dtype, buffer=data)
+        obj._color_mode = color_mode
+        return obj
 
     def _get_channel_data(self, c):
-        if self._channels == self._GRAY_SCALE:
+        if self._color_mode == self._GRAY_SCALE:
             raise ValueError('The image is Gray Scale')
         assert isinstance(c, str), 'send str R, G or B for channel.'
-        return self.data[:, :, self._channels.index(c.upper())]
+        return self[:, :, self._color_mode.index(c.upper())]
+
+    def get_lower_scale(self, scale: Union[int, float]):
+        return self.height // scale, self.width // scale
+
+    def get_high_scale(self, scale: Union[int, float]):
+        return int(self.height * scale), int(self.width * scale)
+
+    def set_border(self, size: int = 1, color: Tuple[int, int, int] = (0, 255, 0)):
+        cv2.rectangle(self, (size, size), (self.width - 1, self.height - 1), color, size)
 
     @property
-    def data(self) -> np.ndarray:
-        return self._data
+    def mask(self):
+        return Image(np.zeros(self.shape[:2], dtype=np.uint8))
 
-    def flip(self) -> Image:
-        self._data = cv2.flip(self._data, 1)
+    @property
+    def top(self):
+        return self[:self.height // 2, :]
+
+    @top.setter
+    def top(self, value):
+        value: Image = Image(value)
+        value = value.resize(self.top.shape[:2], keep_scale=False)
+        self[:self.height // 2, :] = value
+
+    @property
+    def left(self):
+        return self[:, :self.width // 2]
+
+    @left.setter
+    def left(self, value):
+        value: Image = Image(value)
+        value = value.resize(self.left.shape[:2], keep_scale=False)
+        self[:, :self.width // 2] = value
+
+    @property
+    def right(self):
+        return self[:, self.width // 2:]
+
+    @right.setter
+    def right(self, value):
+        value: Image = Image(value)
+        value = value.resize(self.right.shape[:2], keep_scale=False)
+        self[:, self.width // 2:] = value
+
+    @property
+    def center(self):
+        y, x = self.get_lower_scale(3)
+        return self[y:y * 2, :]
+
+    @center.setter
+    def center(self, value):
+        y, x = self.get_lower_scale(3)
+        value: Image = Image(value)
+        value = value.resize(self.center.shape[:2], keep_scale=False)
+        self[y:y * 2, :] = value
+
+    @property
+    def bottom(self):
+        return self[self.height // 2:, :]
+
+    @bottom.setter
+    def bottom(self, value):
+        value: Image = Image(value)
+        value = value.resize(self.bottom.shape[:2], keep_scale=False)
+        self[self.height // 2:, :] = value
+
+    @property
+    def zoom_in(self):
+        y, x = self.height // 2, self.width // 2
+        dif_h = abs(y - self.height) // 2
+        dif_w = abs(x - self.width) // 2
+        return self[dif_h:self.height - dif_h, dif_w:self.width - dif_w]
+
+    @property
+    def zoom_out(self):
+        y, x = self.height // 2, self.width // 2
+        dif_h = abs(y - self.height) // 2
+        dif_w = abs(x - self.width) // 2
+        new_img = self.resize((self.height - dif_h, self.width - dif_w), keep_scale=False)
+        self[:, :, :] *= 0
+        self[dif_h // 2:self.height - dif_h // 2, dif_w // 2:self.width - dif_w // 2] = new_img
         return self
+
+    def flip(self, axis=1) -> Union[np.ndarray, 'Image']:
+        return np.flip(self, axis=axis)
 
     @property
     def r(self) -> np.ndarray:
@@ -97,7 +167,7 @@ class Image(_InterfaceImage):
         return self.shape[0]
 
     @property
-    def center(self) -> Tuple[int, int]:
+    def center_position(self) -> Tuple[int, int]:
         return int(self.width // 2), int(self.height // 2)
 
     @property
@@ -118,33 +188,39 @@ class Image(_InterfaceImage):
         o_h, o_w = cls._get_h_w(original_shape)
         n_h, n_w = cls._get_h_w(new_shape)
         if o_h < o_w:
-            return n_w, math.floor(o_h / (o_w / n_w))
-        return math.floor(o_w / (o_h / n_h)), n_h
+            return math.floor(o_h / (o_w / n_w)), n_w
+        return n_h, math.floor(o_w / (o_h / n_h))
+
+    @classmethod
+    def get_empty_image(cls, shape=(480, 640, 3), color=(0, 0, 0)):
+        return cls((np.ones(shape, dtype=np.uint8) * color).astype(np.uint8))
 
     def bgr_to_rgb(self) -> Image:
-        if self._channels == 'BGR':
-            self._data = cv2.cvtColor(self._data, cv2.COLOR_BGR2RGB)
-            self._channels = 'RGB'
-        else:
-            raise Exception("Image isn't BGR")
+        if self._color_mode == 'BGR':
+            self._color_mode = 'RGB'
+            self[:, ] = cv2.cvtColor(self, cv2.COLOR_BGR2RGB)
         return self
 
-    def to_gray_scale(self) -> Image:
-        if self._channels == 'BGR':
-            self._data = cv2.cvtColor(self._data, cv2.COLOR_BGR2GRAY)
-        elif self._channels == 'RGB':
-            self._data = cv2.cvtColor(self._data, cv2.COLOR_RGB2GRAY)
-        else:
-            raise Exception("Image isn't RGB or BGR")
-        self._channels = self._GRAY_SCALE
+    @property
+    def gray_scale(self) -> Image:
+        code_ = {'BGR':  cv2.COLOR_BGR2GRAY,
+                 'RGB':  cv2.COLOR_RGB2GRAY,
+                 'RGBA': cv2.COLOR_RGBA2GRAY,
+                 'BGRA': cv2.COLOR_BGRA2GRAY}.get(self._color_mode)
+        if code_ is not None:
+            return Image(cv2.cvtColor(self, code_))
         return self
 
     def rgb_to_bgr(self) -> Image:
-        if self._channels == 'RGB':
-            self._data = cv2.cvtColor(self._data, cv2.COLOR_RGB2BGR)
-            self._channels = 'BGR'
-        else:
-            raise Exception("Image isn't RGB")
+        if self._color_mode == 'RGB':
+            self._color_mode = 'BGR'
+            self[:, ] = cv2.cvtColor(self, cv2.COLOR_RGB2BGR)
+        elif self._color_mode == 'RGBA':
+            self._color_mode = 'BGR'
+            self[:, ] = cv2.cvtColor(self, cv2.COLOR_RGBA2BGR)
+        elif self._color_mode == 'BGRA':
+            self._color_mode = 'BGR'
+            self[:, ] = cv2.cvtColor(self, cv2.COLOR_BGRA2BGR)
         return self
 
     def resize(self, shape: Union[tuple, list], keep_scale: bool = False) -> Image:
@@ -154,16 +230,14 @@ class Image(_InterfaceImage):
                the axes, however the shape may be different as it maintains the proportion
         """
         shape = self.size_proportional(self.shape, shape) if keep_scale else self._get_h_w(shape)
-        self._data = cv2.resize(self.data, shape)
-        return self
+        return Image(cv2.resize(self, shape[::-1]))
 
     def rotate(self, degrees=90):
         assert degrees in (90, 180, -90), ValueError('send integer 90, -90 or 180')
-        self._data = cv2.rotate(self.data, {90:  cv2.ROTATE_90_CLOCKWISE,
-                                            -90: cv2.ROTATE_90_COUNTERCLOCKWISE,
-                                            180: cv2.ROTATE_180
-                                            }.get(degrees))
-        return self
+        return cv2.rotate(self, {90:  cv2.ROTATE_90_CLOCKWISE,
+                                 -90: cv2.ROTATE_90_COUNTERCLOCKWISE,
+                                 180: cv2.ROTATE_180
+                                 }.get(degrees))
 
     def crop_by_center(self, size) -> Image:
         assert isinstance(size, (list, tuple)) and cj.is_numeric_sequence(size) and len(
@@ -172,42 +246,64 @@ class Image(_InterfaceImage):
         new_h, new_w = size
         assert self.width >= new_w and self.height >= new_h, f'This is impossible because the image {self.shape} ' \
                                                              f'has proportions smaller than the size sent {size}'
-        im_crop = self.data.copy()
-        bottom = (self.center[0], self.center[1] + new_h // 2)
-        top = (self.center[0], self.center[1] - new_h // 2)
-        left = (self.center[0] - new_w // 2, self.center[1])
-        right = (self.center[0] + new_w // 2, self.center[1])
+        im_crop = self.copy()
+        bottom = (self.center_position[0], self.center_position[1] + new_h // 2)
+        top = (self.center_position[0], self.center_position[1] - new_h // 2)
+        left = (self.center_position[0] - new_w // 2, self.center_position[1])
+        right = (self.center_position[0] + new_w // 2, self.center_position[1])
 
         start = left[0], top[-1]
 
         end = right[0], bottom[-1]
 
-        self._data = im_crop[start[1]:end[1], start[0]:end[0]]
-        return self
+        return Image(cv2.resize(im_crop[start[1]:end[1], start[0]:end[0]], (new_w, new_h)))
 
     def prune(self) -> Image:
         min_len = self.min_len
-        return self.crop_by_center((min_len, min_len))
+        return Image(self.crop_by_center((min_len, min_len)))
+
+    def circle(self, radius=None, position=None, color=(0, 0, 0), thickness=1):
+        position = position or self.center_position
+        radius = radius or self.min_len // 2
+        cv2.circle(self, position, radius, color, thickness)
+        return self
+
+    def get_mask_circle(self, radius=None, position=None):
+        return self.mask.circle(radius=radius, position=position, color=(255, 255, 255), thickness=-1)
+
+    def crop_circle(self, radius=None, position=None, inverse=False):
+        mask = self.get_mask_circle(radius=radius, position=position)
+        return Image(cv2.bitwise_and(self, self, mask=mask if not inverse else ~mask))
+
+    def add_circle_from_image(self, image: Image, radius=None, position=None):
+        if not isinstance(image, Image):
+            image = Image(image)
+        assert image.shape == self.shape, f'Image shape must be the same as the image to be added {image.shape}'
+        cropped_image = image.crop_circle(radius=radius, position=position)
+        cropped_self = self.crop_circle(radius=radius, position=position, inverse=True)
+        return Image(cv2.add(cropped_self, cropped_image))
 
     def plot(self):
         if ON_COLAB_JUPYTER:
             # noinspection PyUnresolvedReferences
             from google.colab.patches import cv2_imshow
-            cv2_imshow(self.data)
+            cv2_imshow(self)
         else:
-            if self._channels == 'BGR':
-                plt.imshow(cv2.cvtColor(self.data, cv2.COLOR_BGR2RGB))
+            if self._color_mode == 'BGR':
+                plt.imshow(cv2.cvtColor(self, cv2.COLOR_BGR2RGB))
+            elif self._color_mode == self._GRAY_SCALE:
+                plt.imshow(self, cmap='gray')
             else:
-                plt.imshow(self.data)
+                plt.imshow(self)
             plt.show()
 
     def save(self, p: str):
-        cv2.imwrite(p, self.data)
+        cv2.imwrite(p, self)
         assert cj.Path(p).exists, f'Error saving image {p}'
 
     def plot_colors_histogram(self):
         # tuple to select colors of each channel line
-        colors = ("red", "green", "blue") if self._channels == 'RGB' else ('blue', 'green', 'red')
+        colors = ("red", "green", "blue") if self._color_mode == 'RGB' else ('blue', 'green', 'red')
         channel_ids = (0, 1, 2)
 
         # create the histogram plot, with three lines, one for
@@ -216,7 +312,7 @@ class Image(_InterfaceImage):
         plt.xlim([0, 256])
         for channel_id, c in zip(channel_ids, colors):
             histogram, bin_edges = np.histogram(
-                    self.data[:, :, channel_id], bins=256, range=(0, 256)
+                    self[:, :, channel_id], bins=256, range=(0, 256)
             )
             plt.plot(bin_edges[0:-1], histogram, color=c)
 
@@ -291,18 +387,18 @@ class Image(_InterfaceImage):
         x, y = pos
 
         text_w, text_h = text_size
-        cv2.rectangle(self.data, pos, (x + text_w, y + text_h), text_color_bg, -1)
-        cv2.putText(self.data, text, (x, y + int(text_h * 0.9)), font, font_scale, text_color, font_thickness)
+        cv2.rectangle(self, pos, (x + text_w, y + text_h), text_color_bg, -1)
+        cv2.putText(self, text, (x, y + int(text_h * 0.9)), font, font_scale, text_color, font_thickness)
 
         return self
 
     def gaussian_pyramid(self, levels=3, *args, **kwargs):
 
-        img = self.data.copy()
-        pyramid = [Image(img)]
+        img = self.copy()
+        pyramid = [img]
         while levels >= 1:
             img = cv2.pyrDown(img, *args, **kwargs)
-            pyramid.append(Image(img))
+            pyramid.append(img)
             levels -= 1
         return pyramid
 
@@ -310,9 +406,9 @@ class Image(_InterfaceImage):
         gaussian_pyramid = self.gaussian_pyramid(levels)
         pyramid = []
         for i in range(levels, 0, -1):
-            GE = cv2.pyrUp(gaussian_pyramid[i].data)
-            GE = cv2.resize(GE, gaussian_pyramid[i - 1].data.shape[::-1][1:])
-            L = Image(cv2.subtract(gaussian_pyramid[i - 1].data, GE))
+            GE = cv2.pyrUp(gaussian_pyramid[i])
+            GE = cv2.resize(GE, gaussian_pyramid[i - 1].shape[::-1][1:])
+            L = Image(cv2.subtract(gaussian_pyramid[i - 1], GE))
             pyramid.append(L)
         return pyramid
 
@@ -655,10 +751,11 @@ class Video:
     def total_frames(self):
         return self._cap.total_frames if not self._cap.is_webcam else self._current_number_frame + 1
 
-    def __get_next_frame(self) -> Union[np.ndarray, None]:
+    def __get_next_frame(self) -> Union[np.ndarray, Image, None]:
         if self._start_time is None:
             self._start_time = time.time()
         _, image = self._cap.next_frame
+        image = Image(image)
         self._current_number_frame += 1
         if self.current_number_frame > self.total_frames:
             if isinstance(self._cap, cv2.VideoCapture):
@@ -724,13 +821,17 @@ class Video:
         if ON_COLAB_JUPYTER:
             raise NotImplementedError("Not implemented show video on colab")
         self._th_show_running = True
-        while self.is_opened:
-            image = self.__get_next_frame()
-            if image is None:
-                continue
-            cv2.imshow(self._cap.name, Image(image).draw_text(self.video_info).data)
-            if self.is_break_view:
-                self._cap.stop()
+        try:
+            while self.is_opened:
+                image = self.__get_next_frame()
+                if image is None:
+                    continue
+                cv2.imshow(self._cap.name, image.draw_text(self.video_info))
+                if self.is_break_view:
+                    self._cap.stop()
+        except Exception as e:
+            logging.error(e)
+            self._cap.stop()
         self._th_show_running = False
 
     def get_frames(self, n_frames=None):

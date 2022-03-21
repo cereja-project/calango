@@ -31,14 +31,17 @@ print(mouse.position)  # return current postion
 ```
 ## Image API
 ### Image reading
+
 ```python
 from calango import Image
 
 image = Image(image_or_path='image.png')
-image.draw_text('Hello World!', pos='left_bottom') # draw text on image
+image[:50, :50].plot() # plot image cropped (0:50, 0:50)
+image.right.top.plot() # get image cropped at right top corner
+image.draw_text('Hello World!', pos='left_bottom')  # draw text on image
 image.height  # return image height
 image.width  # return image width
-image.center  # return image center position
+image.center_position  # return image center position
 image.crop_by_center((20, 20))  # crop image by center
 image.prune()  # resize image to square size by min(width, height)
 # ... and more
