@@ -51,6 +51,12 @@ class Image(np.ndarray):
         obj._color_mode = color_mode
         return obj
 
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f'Image({self.shape}, {self._color_mode})'
+
     def _get_channel_data(self, c):
         if self._color_mode == self._GRAY_SCALE:
             raise ValueError('The image is Gray Scale')
