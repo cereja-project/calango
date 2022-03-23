@@ -14,12 +14,12 @@ import numpy as np
 import logging
 from matplotlib import pyplot as plt
 
-from calango.devices import Mouse
-from calango.settings import ON_COLAB_JUPYTER
+from .devices import Mouse
+from .settings import ON_COLAB_JUPYTER
 
 __all__ = ['Image', 'Video', 'VideoWriter']
 
-from calango.utils import show_local_mp4
+from .utils import show_local_mp4
 
 
 def is_url(val):
