@@ -28,7 +28,7 @@ try:
     import pyautogui
 
     pyautogui_available = True
-except ImportError:
+except:
     pyautogui_available = False
 
 __all__ = ['Mouse']
