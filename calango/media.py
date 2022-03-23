@@ -6,6 +6,7 @@ import threading
 import time
 from abc import abstractmethod
 from typing import Union, Tuple, Sequence, Iterator
+from urllib.parse import urlparse
 
 import cereja as cj
 import cv2
@@ -13,28 +14,44 @@ import numpy as np
 import logging
 from matplotlib import pyplot as plt
 
-from .devices import Mouse
-from .settings import ON_COLAB_JUPYTER
+from calango.devices import Mouse
+from calango.settings import ON_COLAB_JUPYTER
 
 __all__ = ['Image', 'Video', 'VideoWriter']
 
-from .utils import show_local_mp4
+from calango.utils import show_local_mp4
+
+
+def is_url(val):
+    try:
+        result = urlparse(val)
+        return all([result.scheme, result.netloc])
+    except:
+        return False
 
 
 class Image(np.ndarray):
     _GRAY_SCALE = 'GRAY_SCALE'
-    IMAGE_FORMATS = {'.jpg', '.jpeg', '.png'}
     _color_mode = 'BGR'
 
-    def __new__(cls, image_or_path: Union[str, np.ndarray], color_mode: str = 'BGR'):
+    def __new__(cls, image_or_path: Union[str, np.ndarray], color_mode: str = 'BGR', **kwargs):
         if image_or_path is None:
-            data = np.zeros((480, 640, 3), dtype=np.uint8)
+            data = np.zeros(kwargs.get('shape', (480, 640)), dtype=np.uint8)
         else:
             assert isinstance(color_mode, str), f'channels {color_mode} is not valid.'
             if isinstance(image_or_path, str):
-                p = cj.Path(image_or_path)
-                assert p.exists, FileNotFoundError(f'Image {p.path} not found.')
-                data = cv2.imread(p.path)
+                if is_url(image_or_path):
+                    with cj.TempDir() as dir_path:
+                        req = cj.request.get(image_or_path)
+                        file_path = dir_path.path.join(req.content_type.replace('/', '.'))
+                        cj.FileIO.create(file_path, req.data).save()
+                        data = cv2.imread(file_path.path)
+                else:
+                    p = cj.Path(image_or_path)
+                    assert p.exists, FileNotFoundError(f'Image {p.path} not found.')
+                    data = cv2.imread(p.path)
+                if data is None:
+                    raise ValueError('The image is not valid.')
                 color_mode = 'BGR'
             else:
                 assert isinstance(image_or_path, np.ndarray), 'image_or_path must be np.ndarray or str.'
@@ -107,7 +124,7 @@ class Image(np.ndarray):
         self[:, self.width // 2:] = value
 
     @property
-    def center(self):
+    def center(self) -> Image:
         y, x = self.get_lower_scale(3)
         return self[y:y * 2, :]
 
@@ -198,7 +215,7 @@ class Image(np.ndarray):
         return n_h, math.floor(o_w / (o_h / n_h))
 
     @classmethod
-    def get_empty_image(cls, shape=(480, 640, 3), color=(0, 0, 0)):
+    def get_empty_image(cls, shape=(480, 640, 3), color=(0, 0, 0)) -> 'Image':
         return cls((np.ones(shape, dtype=np.uint8) * color).astype(np.uint8))
 
     def bgr_to_rgb(self) -> Image:
@@ -501,6 +518,14 @@ class _IVideo:
         pass
 
     @property
+    def is_stream(self) -> bool:
+        pass
+
+    @abstractmethod
+    def set_fps(self, fps: Union[int, float]) -> None:
+        pass
+
+    @property
     @abstractmethod
     def is_opened(self) -> bool:
         pass
@@ -524,13 +549,13 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
 
     def __init__(self, *args, fps=None, **kwargs):
         self._is_webcam = not bool(args and isinstance(args[0], str))
+        self._is_stream = cj.request.is_url(args[0]) if not self._is_webcam else False
         args = (*args, cv2.CAP_DSHOW) if self._is_webcam else args
         super().__init__(*args, **kwargs)
         if fps is not None:
-            assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
-        else:
-            fps = self.get(cv2.CAP_PROP_FPS)
-        self._fps = fps
+            self.set(cv2.CAP_PROP_FPS, fps)
+        if self._is_webcam:
+            self._fps = 30.0
         self._total_frames = -1 if self._is_webcam else int(self.get(cv2.CAP_PROP_FRAME_COUNT))
         self._width, self._height = int(self.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -550,6 +575,11 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
     def fps(self):
         return self._fps
 
+    def set_fps(self, fps):
+        assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
+        self.set(cv2.CAP_PROP_FPS, fps)
+        self._fps = fps
+
     @property
     def next_frame(self) -> Tuple[bool, Union[np.ndarray, None]]:
         return self.read()
@@ -557,6 +587,10 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
     @property
     def is_webcam(self):
         return self._is_webcam
+
+    @property
+    def is_stream(self):
+        return self._is_stream
 
     @property
     def is_opened(self) -> bool:
@@ -597,6 +631,10 @@ class _FrameSequence(_IVideo):
         return False
 
     @property
+    def is_stream(self) -> bool:
+        return False
+
+    @property
     def is_opened(self) -> bool:
         return self._is_opened
 
@@ -620,6 +658,10 @@ class _FrameSequence(_IVideo):
     def fps(self):
         return self._fps
 
+    def set_fps(self, fps):
+        assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
+        self._fps = fps
+
     @classmethod
     def load_from_dir(cls, p):
         paths = cj.Path(p).list_dir()
@@ -636,8 +678,10 @@ class _FrameSequence(_IVideo):
     @classmethod
     def _read_images_paths(cls, paths):
         for fp in paths:
-            if fp.is_file and fp.suffix in Image.IMAGE_FORMATS:
-                yield cv2.imread(fp.path)
+            if fp.is_file:
+                img = cv2.imread(fp.path)
+                if img is not None:
+                    yield img
 
     def stop(self):
         self._frames = None
@@ -645,13 +689,18 @@ class _FrameSequence(_IVideo):
 
 
 class Screen(_IVideo):
-    def __init__(self, *args):
-        mouse = Mouse()
+    def __init__(self, *args, fps=30, **kwargs):
+        mouse = Mouse(*args, **kwargs)
 
         self._width, self._height = mouse.window_size
         self._mon = {'left': 0, 'top': 0, 'width': self._width, 'height': self._height}
         self._capture = True
         self._frames = self.__get_frames()
+        self._fps = fps
+
+    def set_fps(self, fps: Union[int, float]) -> None:
+        assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
+        self._fps = fps
 
     @property
     def width(self) -> int:
@@ -677,11 +726,15 @@ class Screen(_IVideo):
 
     @property
     def fps(self) -> Union[int, float]:
-        return 30
+        return self._fps
 
     @property
     def is_webcam(self) -> bool:
         return True
+
+    @property
+    def is_stream(self) -> bool:
+        return False
 
     @property
     def is_opened(self) -> bool:
@@ -695,16 +748,22 @@ class Video:
 
     def __init__(self, *args, fps=None, **kwargs):
         kwargs['fps'] = fps
+        self._speed = 1
         self._args = args
         self._kwargs = kwargs
         self._build()
         self._th_show = None
+        self._t0 = None
+        self._fps_time = None
+        self._count_frames = 0
 
     def _build(self):
         if len(self._args):
             if isinstance(self._args[0], str):
                 if self._args[0] == 'monitor':
                     self._cap = Screen()
+                elif cj.request.is_url(self._args[0]):
+                    self._cap = _VideoCV2(*self._args, **self._kwargs)
                 else:
                     path_ = cj.Path(self._args[0])
                     assert path_.exists, FileNotFoundError(f'{path_.path}')
@@ -727,7 +786,6 @@ class Video:
         assert hasattr(self, '_cap'), NotImplementedError(
                 f'Internal error. Please open new issue on https://github.com/cereja-project/calango')
         self._current_number_frame = 0
-        self._start_time = None
 
         self._th_show_running = False
         self._last_frame = None
@@ -745,24 +803,22 @@ class Video:
         return self._cap.height
 
     @property
-    def fps(self):
-        if not self._cap.is_webcam:
-            time_it = time.time() - self._start_time
-            if time_it >= 1:
-                return int(round(self.current_number_frame / time_it))
-            return self._cap.fps
-        return int(round(self.current_number_frame / (time.time() - self._start_time)))
-
-    @property
     def total_frames(self):
         return self._cap.total_frames if not self._cap.is_webcam else self._current_number_frame + 1
 
     def __get_next_frame(self) -> Union[np.ndarray, Image, None]:
-        if self._start_time is None:
-            self._start_time = time.time()
+        if self._t0 is None:
+            self._t0 = time.time()
+            self._fps_time = self._t0  # for fps on show
         _, image = self._cap.next_frame
-        image = Image(image)
-        self._current_number_frame += 1
+        if self._cap.is_stream and image is None:
+            image = Image.get_empty_image(
+                    (self.height, self.width, 3)) if self._last_frame is None else self._last_frame
+            image.center.draw_text('Streaming...', pos='center_bottom', font_scale=4)
+        else:
+            image = Image(image)
+            self._current_number_frame += 1
+            self._count_frames += 1  # for calculate fps correctly
         if self.current_number_frame > self.total_frames:
             if isinstance(self._cap, cv2.VideoCapture):
                 self._cap.release()
@@ -792,20 +848,31 @@ class Video:
                 batch_frames = batch_frames[strides:]
 
     @property
+    def fps(self):
+        if self._th_show_running and not self._cap.is_webcam:
+            time_it = (time.time() - self._fps_time)
+            if time_it >= 1:
+                return self._count_frames / time_it
+
+        return self._cap.fps * self._speed
+
+    @property
     def is_break_view(self) -> bool:
         if not self._cap.is_webcam:
-            time_it = time.time() - self._start_time
             # need to take fps in video view
-            wait_msec = self._cap.fps + int(
-                    abs(self.current_number_frame - time_it * self._cap.fps)) * self._cap.fps
+            time_it = (time.time() - self._fps_time)
+
+            wait_msec = (self._cap.fps * self._speed) + int(
+                    abs(self._count_frames - time_it * (self._cap.fps * self._speed)))
         else:
-            wait_msec = 1000
-        k = cv2.waitKey(int(1000 // wait_msec))
+            wait_msec = self._cap.fps * self._speed
+        time.sleep(1 / wait_msec)
+        k = cv2.waitKey(1)
         return k == ord('q') or k == ord('\x1b')
 
     @property
     def video_info(self):
-        return f"Size: {self._size_info} - FPS: {self._fps_info} - Frames: {self._frames_info} T: {self._time_info}"
+        return f"Size: {self._size_info} - FPS: {self._fps_info} - Frames: {self._frames_info} T: {self._time_info} - Speed: {self._speed_info}"
 
     @property
     def _size_info(self):
@@ -817,7 +884,11 @@ class Video:
 
     @property
     def _time_info(self):
-        return f'{round(time.time() - self._start_time, 1)} s'
+        return f'{round(time.time() - self._t0, 1)} s'
+
+    @property
+    def _speed_info(self):
+        return f'{self._speed}x'
 
     @property
     def _frames_info(self):
@@ -899,3 +970,8 @@ class Video:
     @property
     def duration(self):
         return self.total_frames / self._cap.fps
+
+    def set_speed(self, speed=1):
+        self._fps_time = time.time()
+        self._speed = speed
+        self._count_frames = 0
