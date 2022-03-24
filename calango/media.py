@@ -554,8 +554,9 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
         super().__init__(*args, **kwargs)
         if fps is not None:
             self.set(cv2.CAP_PROP_FPS, fps)
-        if self._is_webcam:
-            self._fps = 30.0
+        elif self.get(cv2.CAP_PROP_FPS) == 0:
+            self.set(cv2.CAP_PROP_FPS, 30)
+        self._fps = self.get(cv2.CAP_PROP_FPS)
         self._total_frames = -1 if self._is_webcam else int(self.get(cv2.CAP_PROP_FRAME_COUNT))
         self._width, self._height = int(self.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -811,14 +812,9 @@ class Video:
             self._t0 = time.time()
             self._fps_time = self._t0  # for fps on show
         _, image = self._cap.next_frame
-        if self._cap.is_stream and image is None:
-            image = Image.get_empty_image(
-                    (self.height, self.width, 3)) if self._last_frame is None else self._last_frame
-            image.center.draw_text('Streaming...', pos='center_bottom', font_scale=4)
-        else:
-            image = Image(image)
-            self._current_number_frame += 1
-            self._count_frames += 1  # for calculate fps correctly
+        image = Image(image)
+        self._current_number_frame += 1
+        self._count_frames += 1  # for calculate fps correctly
         if self.current_number_frame > self.total_frames:
             if isinstance(self._cap, cv2.VideoCapture):
                 self._cap.release()
@@ -901,8 +897,10 @@ class Video:
         try:
             while self.is_opened:
                 image = self.__get_next_frame()
-                if image is None:
-                    continue
+                if self._cap.is_stream and image is None:
+                    image = Image.get_empty_image(
+                            (self.height, self.width, 3)) if self._last_frame is None else self._last_frame
+                    image.center.draw_text('Buffering...', pos='center_bottom', font_scale=4)
                 cv2.imshow(self._cap.name, image.draw_text(self.video_info))
                 if self.is_break_view:
                     self._cap.stop()
