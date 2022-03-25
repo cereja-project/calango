@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import math
 import subprocess
 import threading
@@ -34,28 +35,35 @@ class Image(np.ndarray):
     _GRAY_SCALE = 'GRAY_SCALE'
     _color_mode = 'BGR'
 
-    def __new__(cls, image_or_path: Union[str, np.ndarray], color_mode: str = 'BGR', **kwargs):
-        if image_or_path is None:
+    def __new__(cls, im: Union[str, np.ndarray], color_mode: str = 'BGR', **kwargs):
+        if im is None:
             data = np.zeros(kwargs.get('shape', (480, 640)), dtype=np.uint8)
         else:
             assert isinstance(color_mode, str), f'channels {color_mode} is not valid.'
-            if isinstance(image_or_path, str):
-                if is_url(image_or_path):
+            if isinstance(im, str):
+                if is_url(im):
                     with cj.TempDir() as dir_path:
-                        req = cj.request.get(image_or_path)
+                        req = cj.request.get(im)
                         file_path = dir_path.path.join(req.content_type.replace('/', '.'))
                         cj.FileIO.create(file_path, req.data).save()
                         data = cv2.imread(file_path.path)
                 else:
-                    p = cj.Path(image_or_path)
+                    p = cj.Path(im)
                     assert p.exists, FileNotFoundError(f'Image {p.path} not found.')
                     data = cv2.imread(p.path)
                 if data is None:
                     raise ValueError('The image is not valid.')
                 color_mode = 'BGR'
+            elif isinstance(im, plt.Figure):
+                io_buf = io.BytesIO()
+                im.savefig(io_buf, format='raw')
+                io_buf.seek(0)
+                data = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
+                                  newshape=(int(im.bbox.bounds[3]), int(im.bbox.bounds[2]), -1))
+            elif isinstance(im, np.ndarray):
+                data = im.copy()
             else:
-                assert isinstance(image_or_path, np.ndarray), 'image_or_path must be np.ndarray or str.'
-                data = image_or_path.copy()
+                raise TypeError(f'{type(im)} is not valid.')
 
         if data.shape[-1] == 1 or len(data.shape) == 2:
             color_mode = cls._GRAY_SCALE
@@ -895,12 +903,7 @@ class Video:
             raise NotImplementedError("Not implemented show video on colab")
         self._th_show_running = True
         try:
-            while self.is_opened:
-                image = self.__get_next_frame()
-                if self._cap.is_stream and image is None:
-                    image = Image.get_empty_image(
-                            (self.height, self.width, 3)) if self._last_frame is None else self._last_frame
-                    image.center.draw_text('Buffering...', pos='center_bottom', font_scale=4)
+            for image in self.get_frames():
                 cv2.imshow(self._cap.name, image.draw_text(self.video_info))
                 if self.is_break_view:
                     self._cap.stop()
@@ -910,6 +913,7 @@ class Video:
         self._th_show_running = False
 
     def get_frames(self, n_frames=None):
+        assert self._th_show_running, "The video is showing, so you can't get frames"
         if not self.is_opened:
             self._build()
 
@@ -944,8 +948,6 @@ class Video:
         else:
             if self._th_show_running:
                 return
-            if not self.is_opened:
-                self._build()
             if self._th_show is not None:
                 self._th_show.join()
             self._th_show = threading.Thread(target=self._show, daemon=True)
@@ -957,10 +959,9 @@ class Video:
         p = cj.Path(p)
         size_number = len(str(_frame_count))
         max_frame = max(filter_map)
-        while self.current_number_frame < max_frame:
-            frame = self.next_frame
-            if frame is None:
-                continue
+        for frame in self.get_frames():
+            if not (self.current_number_frame < max_frame):
+                break
             prefix = cj.get_zero_mask(self.current_number_frame, size_number)
             if self.current_number_frame in filter_map:
                 cv2.imwrite(p.join(f'{prefix}.{img_format}').path, frame)
