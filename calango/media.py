@@ -35,7 +35,7 @@ class Image(np.ndarray):
     _GRAY_SCALE = 'GRAY_SCALE'
     _color_mode = 'BGR'
 
-    def __new__(cls, im: Union[str, np.ndarray], color_mode: str = 'BGR', **kwargs):
+    def __new__(cls, im: Union[str, np.ndarray], color_mode: str = 'BGR', **kwargs) -> 'Image':
         if im is None:
             data = np.zeros(kwargs.get('shape', (480, 640)), dtype=np.uint8)
         else:
