@@ -107,7 +107,7 @@ class Image(np.ndarray):
 
     @top.setter
     def top(self, value):
-        value: Image = Image(value)
+        value: Image = Image(value)[:, :, :self.shape[-1]]
         value = value.resize(self.top.shape[:2], keep_scale=False)
         self[:self.height // 2, :] = value
 
@@ -117,7 +117,7 @@ class Image(np.ndarray):
 
     @left.setter
     def left(self, value):
-        value: Image = Image(value)
+        value: Image = Image(value)[:, :, :self.shape[-1]]
         value = value.resize(self.left.shape[:2], keep_scale=False)
         self[:, :self.width // 2] = value
 
@@ -127,7 +127,7 @@ class Image(np.ndarray):
 
     @right.setter
     def right(self, value):
-        value: Image = Image(value)
+        value: Image = Image(value)[:, :, :self.shape[-1]]
         value = value.resize(self.right.shape[:2], keep_scale=False)
         self[:, self.width // 2:] = value
 
@@ -139,7 +139,7 @@ class Image(np.ndarray):
     @center.setter
     def center(self, value):
         y, x = self.get_lower_scale(3)
-        value: Image = Image(value)
+        value: Image = Image(value)[:, :, :self.shape[-1]]
         value = value.resize(self.center.shape[:2], keep_scale=False)
         self[y:y * 2, :] = value
 
@@ -196,6 +196,12 @@ class Image(np.ndarray):
     @property
     def height(self) -> int:
         return self.shape[0]
+
+    @property
+    def pyramid_level(self) -> int:
+        if self.width < self.height:
+            return int(np.log2(self.width))
+        return int(np.log2(self.height))
 
     @property
     def center_position(self) -> Tuple[int, int]:
@@ -398,7 +404,9 @@ class Image(np.ndarray):
 
         text = str(text)
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
-        font_scale = min((self.width - (self.width * 0.2)) / text_size[0], font_scale)
+        if text_size[0] > self.width:
+            font_scale = min(text_size[0] / (self.width - (self.width * 0.2)), font_scale)
+
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         text_size = text_size[0], int(text_size[1] * 1.5)
         k = int(self.min_len * 0.03)
@@ -406,14 +414,16 @@ class Image(np.ndarray):
         w_top_r_limit = (self.width - text_size[0]) - k
         w_center_limit = int((self.width - text_size[0]) // 2) + k
         h_bottom_limit = (self.height - text_size[1]) - k
+        center = w_center_limit, int((self.height - text_size[-1]) // 2)
 
         pos = {'left_top':      (k, k),
                'left_bottom':   (k, h_bottom_limit),
                'right_top':     (w_top_r_limit, k),
                'right_bottom':  (w_top_r_limit, h_bottom_limit),
                'center_top':    (w_center_limit, k),
-               'center_bottom': (w_center_limit, h_bottom_limit)
-               }.get(pos, (k, k))
+               'center_bottom': (w_center_limit, h_bottom_limit),
+               'center':        center
+               }.get(pos, center)
 
         x, y = pos
 
