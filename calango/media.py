@@ -144,6 +144,20 @@ class Image(np.ndarray):
         self[y:y * 2, :] = value
 
     @property
+    def center_crop(self):
+        y, x = self.height // 2, self.width // 2
+        k = min(y, x)
+        return self[y - k // 2:y + k // 2, x - k // 2:x + k // 2]
+
+    @center_crop.setter
+    def center_crop(self, value):
+        y, x = self.height // 2, self.width // 2
+        k = min(y, x)
+        value: Image = Image(value)[:, :, :self.shape[-1]]
+        value = value.resize(self.center_crop.shape[:2], keep_scale=False)
+        self[y - k // 2:y + k // 2, x - k // 2:x + k // 2] = value
+
+    @property
     def bottom(self):
         return self[self.height // 2:, :]
 
@@ -276,11 +290,14 @@ class Image(np.ndarray):
                                  180: cv2.ROTATE_180
                                  }.get(degrees))
 
-    def crop_by_center(self, size) -> Image:
-        assert isinstance(size, (list, tuple)) and cj.is_numeric_sequence(size) and len(
+    def crop_by_center(self, size=None, keep_scale=False) -> Image:
+        assert size is None or isinstance(size, (list, tuple)) and cj.is_numeric_sequence(size) and len(
                 size) == 2, 'Send HxW image cropped output'
-
+        if size is None:
+            size = self.min_len, self.min_len
         new_h, new_w = size
+        if keep_scale:
+            new_h, new_w = self.size_proportional(self.shape, (new_h, new_w))
         assert self.width >= new_w and self.height >= new_h, f'This is impossible because the image {self.shape} ' \
                                                              f'has proportions smaller than the size sent {size}'
         im_crop = self.copy()
