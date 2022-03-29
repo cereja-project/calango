@@ -8,7 +8,6 @@ import time
 from abc import abstractmethod
 from typing import Union, Tuple, Sequence, Iterator
 from urllib.parse import urlparse
-
 import cereja as cj
 import cv2
 import numpy as np
@@ -35,9 +34,10 @@ class Image(np.ndarray):
     _GRAY_SCALE = 'GRAY_SCALE'
     _color_mode = 'BGR'
 
-    def __new__(cls, im: Union[str, np.ndarray], color_mode: str = 'BGR', **kwargs) -> 'Image':
+    def __new__(cls, im: Union[str, np.ndarray] = None, color_mode: str = 'BGR', shape=None, dtype=None,
+                **kwargs) -> 'Image':
         if im is None:
-            data = np.zeros(kwargs.get('shape', (480, 640)), dtype=np.uint8)
+            data = np.zeros(kwargs.get('shape', (480, 640)), dtype=dtype or np.uint8)
         else:
             assert isinstance(color_mode, str), f'channels {color_mode} is not valid.'
             if isinstance(im, str):
@@ -80,7 +80,9 @@ class Image(np.ndarray):
         return self.__str__()
 
     def __str__(self):
-        return f'Image({self.shape}, {self._color_mode})'
+        if len(self.shape) == 3 and self.dtype != bool:
+            return f'Image({self.shape}, {self._color_mode})'
+        return super().__str__()
 
     def _get_channel_data(self, c):
         if self._color_mode == self._GRAY_SCALE:
@@ -212,12 +214,6 @@ class Image(np.ndarray):
         return self.shape[0]
 
     @property
-    def pyramid_level(self) -> int:
-        if self.width < self.height:
-            return int(np.log2(self.width))
-        return int(np.log2(self.height))
-
-    @property
     def center_position(self) -> Tuple[int, int]:
         return int(self.width // 2), int(self.height // 2)
 
@@ -281,7 +277,7 @@ class Image(np.ndarray):
                the axes, however the shape may be different as it maintains the proportion
         """
         shape = self.size_proportional(self.shape, shape) if keep_scale else self._get_h_w(shape)
-        return Image(cv2.resize(self, shape[::-1]))
+        return Image(cv2.resize(self, shape[::-1], interpolation=cv2.INTER_AREA))
 
     def rotate(self, degrees=90):
         assert degrees in (90, 180, -90), ValueError('send integer 90, -90 or 180')
@@ -450,22 +446,28 @@ class Image(np.ndarray):
 
         return self
 
-    def gaussian_pyramid(self, levels=3, *args, **kwargs):
+    @property
+    def pyramid_levels(self) -> int:
+        if self.width < self.height:
+            return int(round(np.log2(self.width)))
+        return int(round(np.log2(self.height)))
 
+    def gaussian_pyramid(self, levels=None, *args, **kwargs):
+        levels = levels or self.pyramid_levels
         img = self.copy()
         pyramid = [img]
-        while levels >= 1:
+        for _ in range(levels):
             img = cv2.pyrDown(img, *args, **kwargs)
             pyramid.append(img)
-            levels -= 1
+        assert len(pyramid) == levels + 1, "Pyramid levels is not correct"
         return pyramid
 
-    def laplacian_pyramid(self, levels=3) -> Sequence[Image]:
+    def laplacian_pyramid(self, levels=None) -> Sequence[Image]:
+        levels = levels or self.pyramid_levels
         gaussian_pyramid = self.gaussian_pyramid(levels)
         pyramid = []
         for i in range(levels, 0, -1):
-            GE = cv2.pyrUp(gaussian_pyramid[i])
-            GE = cv2.resize(GE, gaussian_pyramid[i - 1].shape[::-1][1:])
+            GE = cv2.pyrUp(gaussian_pyramid[i], dstsize=gaussian_pyramid[i - 1].shape[::-1][1:])
             L = Image(cv2.subtract(gaussian_pyramid[i - 1], GE))
             pyramid.append(L)
         return pyramid
@@ -782,11 +784,13 @@ class Screen(_IVideo):
 
 class Video:
 
-    def __init__(self, *args, fps=None, **kwargs):
+    def __init__(self, *args, fps=None, frame_preprocess=lambda frame: frame, **kwargs):
         kwargs['fps'] = fps
         self._speed = 1
+        self._frame_func_preprocess = frame_preprocess
         self._args = args
         self._kwargs = kwargs
+        self._current_number_frame = 0
         self._build()
         self._th_show = None
         self._t0 = None
@@ -822,6 +826,7 @@ class Video:
         assert hasattr(self, '_cap'), NotImplementedError(
                 f'Internal error. Please open new issue on https://github.com/cereja-project/calango')
         self._current_number_frame = 0
+        self._count_frames = 0
 
         self._th_show_running = False
         self._last_frame = None
@@ -847,7 +852,9 @@ class Video:
             self._t0 = time.time()
             self._fps_time = self._t0  # for fps on show
         _, image = self._cap.next_frame
-        image = Image(image)
+        image = self._frame_func_preprocess(Image(image))
+        if not isinstance(image, Image):
+            image = Image(image)
         self._current_number_frame += 1
         self._count_frames += 1  # for calculate fps correctly
         if self.current_number_frame > self.total_frames:
@@ -866,6 +873,16 @@ class Video:
     @property
     def is_opened(self):
         return self._cap.is_opened
+
+    def set_start_on_time(self, _time='00:00:00'):
+        h, m, s = time.strptime(_time, '%H:%M:%S')[-6:-3]
+        h *= 3600
+        m *= 60
+        seconds = h + m + s
+        if isinstance(self._cap, _VideoCV2) and not self._cap.is_webcam:
+            self._cap.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
+        self._current_number_frame = int(round(seconds * self.fps))
+        self._count_frames = self._current_number_frame
 
     def get_batch_frames(self, kernel_size, strides=1, take_number_frame=False):
         batch_frames = []
@@ -940,7 +957,7 @@ class Video:
         self._th_show_running = False
 
     def get_frames(self, n_frames=None):
-        assert self._th_show_running, "The video is showing, so you can't get frames"
+        assert not self._th_show_running, "The video is showing, so you can't get frames"
         if not self.is_opened:
             self._build()
 
