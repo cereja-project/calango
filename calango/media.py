@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import logging
 from matplotlib import pyplot as plt
-from scipy import signal
+from scipy import signal, fftpack
 
 from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
@@ -38,7 +38,7 @@ class Image(np.ndarray):
     def __new__(cls, im: Union[str, np.ndarray] = None, color_mode: str = 'BGR', shape=None, dtype=None,
                 **kwargs) -> 'Image':
         if im is None:
-            data = np.zeros(kwargs.get('shape', (480, 640)), dtype=dtype or np.uint8)
+            data = np.zeros(kwargs.get('shape', (480, 640, 3)), dtype=dtype or np.uint8)
         else:
             assert isinstance(color_mode, str), f'channels {color_mode} is not valid.'
             if isinstance(im, str):
@@ -61,7 +61,7 @@ class Image(np.ndarray):
                 io_buf.seek(0)
                 data = np.reshape(np.frombuffer(io_buf.getvalue(), dtype=np.uint8),
                                   newshape=(int(im.bbox.bounds[3]), int(im.bbox.bounds[2]), -1))
-            elif isinstance(im, np.ndarray):
+            elif isinstance(im, (np.ndarray, Image)):
                 data = im.copy()
             else:
                 raise TypeError(f'{type(im)} is not valid.')
@@ -419,8 +419,8 @@ class Image(np.ndarray):
         text = str(text)
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         if text_size[0] > self.width:
-            font_scale = min(text_size[0] / (self.width - (self.width * 0.2)), font_scale)
-
+            # font_scale = min(text_size[0] / (self.width - (self.width * 0.2)), font_scale)
+            font_scale = self.width / text_size[0]
         text_size, _ = cv2.getTextSize(text, font, font_scale, font_thickness)
         text_size = text_size[0], int(text_size[1] * 1.5)
         k = int(self.min_len * 0.03)
@@ -465,7 +465,7 @@ class Image(np.ndarray):
 
     def laplacian_pyramid(self, levels=None) -> Sequence[Image]:
         levels = levels or self.pyramid_levels
-        gaussian_pyramid = self.gaussian_pyramid(levels)
+        gaussian_pyramid = self.gaussian_pyramid(levels=levels)
         pyramid = []
         for i in range(levels, 0, -1):
             GE = cv2.pyrUp(gaussian_pyramid[i], dstsize=gaussian_pyramid[i - 1].shape[::-1][1:])
