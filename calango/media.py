@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import logging
 from matplotlib import pyplot as plt
+from scipy import signal
 
 from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
@@ -784,18 +785,20 @@ class Screen(_IVideo):
 
 class Video:
 
-    def __init__(self, *args, fps=None, frame_preprocess=lambda frame: frame, **kwargs):
+    def __init__(self, *args, fps=None, frame_preprocess=None, **kwargs):
         kwargs['fps'] = fps
         self._speed = 1
-        self._frame_func_preprocess = frame_preprocess
+        self._frame_func_preprocess = frame_preprocess or (lambda x: x)
         self._args = args
         self._kwargs = kwargs
-        self._current_number_frame = 0
         self._build()
+        self._current_number_frame = 0
         self._th_show = None
         self._t0 = None
         self._fps_time = None
         self._count_frames = 0
+        self._th_show_running = False
+        self._last_frame = None
 
     def _build(self):
         if len(self._args):
@@ -826,8 +829,10 @@ class Video:
         assert hasattr(self, '_cap'), NotImplementedError(
                 f'Internal error. Please open new issue on https://github.com/cereja-project/calango')
         self._current_number_frame = 0
+        self._th_show = None
+        self._t0 = None
+        self._fps_time = None
         self._count_frames = 0
-
         self._th_show_running = False
         self._last_frame = None
 
@@ -858,8 +863,7 @@ class Video:
         self._current_number_frame += 1
         self._count_frames += 1  # for calculate fps correctly
         if self.current_number_frame > self.total_frames:
-            if isinstance(self._cap, cv2.VideoCapture):
-                self._cap.release()
+            self.stop()
             return None
         self._last_frame = image
         return image
@@ -947,13 +951,16 @@ class Video:
             raise NotImplementedError("Not implemented show video on colab")
         self._th_show_running = True
         try:
-            for image in self.get_frames():
+            while self.is_opened:
+                image = self.__get_next_frame()
+                if image is None:
+                    continue
                 cv2.imshow(self._cap.name, image.draw_text(self.video_info))
                 if self.is_break_view:
-                    self._cap.stop()
+                    self.stop()
         except Exception as e:
-            logging.error(e)
-            self._cap.stop()
+            logging.warning(e)
+            self.stop()
         self._th_show_running = False
 
     def get_frames(self, n_frames=None):
@@ -969,7 +976,7 @@ class Video:
             if n_frames is not None:
                 n_frames -= 1
             if n_frames == 0:
-                self._cap.stop()
+                self.stop()
                 break
 
     def save(self, file_path, n_frames=None):
@@ -994,6 +1001,7 @@ class Video:
                 return
             if self._th_show is not None:
                 self._th_show.join()
+                self._build()
             self._th_show = threading.Thread(target=self._show, daemon=True)
             self._th_show.start()
 
@@ -1018,3 +1026,6 @@ class Video:
         self._fps_time = time.time()
         self._speed = speed
         self._count_frames = 0
+
+    def stop(self):
+        self._cap.stop()
