@@ -13,7 +13,6 @@ import cv2
 import numpy as np
 import logging
 from matplotlib import pyplot as plt
-from scipy import signal, fftpack
 
 from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
