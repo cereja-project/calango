@@ -14,6 +14,7 @@ import numpy as np
 import logging
 from matplotlib import pyplot as plt
 
+
 from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
 
@@ -1027,3 +1028,132 @@ class Video:
 
     def stop(self):
         self._cap.stop()
+
+
+class VideoMagnification:
+    def __init__(self, *args, batch_size=20, levels=3, low=2.33, high=2.67, amplification=30, frame_preprocess=None,
+                 **kwargs):
+        self.video = Video(*args, frame_preprocess=frame_preprocess, **kwargs)
+        self.batch_size = batch_size
+        self.levels = levels
+        self.low = low
+        self.amplification = amplification
+        self.high = high
+
+    def get_batch_frames(self, kernel_size, strides=1):
+        batch_frames = []
+        batch_frames_tensor = []
+        while self.video.is_opened:
+            frame = self.video.next_frame
+            if frame is None:
+                continue
+            batch_frames_tensor.append(frame.copy())
+            laplacian = frame.laplacian_pyramid(self.levels)
+            if len(batch_frames) == 0:
+                for i in range(len(laplacian)):
+                    batch_frames.append([laplacian[i]])
+            else:
+                for i in range(len(laplacian)):
+                    batch_frames[i].append(laplacian[i])
+            if len(batch_frames_tensor) == kernel_size:
+                yield batch_frames_tensor.copy(), batch_frames.copy()
+                batch_frames = [pyramid_level[strides:] for pyramid_level in batch_frames]
+                batch_frames_tensor = batch_frames_tensor[strides:]
+
+    def butter_bandpass_filter(self, data, lowcut, highcut, fs, order=5):
+        from scipy import signal, fftpack
+        omega = 0.5 * fs
+        low = lowcut / omega
+        high = highcut / omega
+        b, a = signal.butter(order, [low, high], btype='band')
+        y = signal.lfilter(b, a, data, axis=0)
+        return y
+
+    def temporal_ideal_filter(self, tensor, low, high, fps, axis=0):
+        from scipy import signal, fftpack
+        fft = fftpack.fft(tensor, axis=axis)
+        frequencies = fftpack.fftfreq(len(tensor), d=1.0 / fps)
+        bound_low = (np.abs(frequencies - low)).argmin()
+        bound_high = (np.abs(frequencies - high)).argmin()
+        fft[:bound_low] = 0
+        fft[bound_high:-bound_high] = 0
+        fft[-bound_low:] = 0
+        iff = fftpack.ifft(fft, axis=axis)
+        return np.abs(iff)
+
+    def reconstract_from_tensorlist(self, filter_tensor_list):
+        final = np.zeros(filter_tensor_list[-1].shape)
+        for i in range(filter_tensor_list[0].shape[0]):
+            up = filter_tensor_list[0][i]
+            for n in range(len(filter_tensor_list) - 1):
+                k = filter_tensor_list[n + 1][i]
+                up = cv2.pyrUp(up, dstsize=(k.shape[1], k.shape[0])) + k
+            final[i] = up
+        return final
+
+    def magnify_motion(self, video_tensor, laplacian_tensor_list):
+        filter_tensor_list = []
+        for lap in laplacian_tensor_list:
+            filter_tensor = self.butter_bandpass_filter(lap, 0.4, 0.8, int(self.video.fps), order=len(laplacian_tensor_list))
+            filter_tensor *= 150
+            filter_tensor_list.append(filter_tensor)
+        recon = self.reconstract_from_tensorlist(filter_tensor_list)
+        final = video_tensor + recon
+
+        return final
+
+    def magnify_color(self, motion_video_tensor, laplacian_tensor_list):
+        output = self.gaussian_video(motion_video_tensor.copy(), len(laplacian_tensor_list))
+        output = self.temporal_ideal_filter(output, self.low, self.high, self.video.fps)[-1] * self.amplification
+        for n in range(len(laplacian_tensor_list) - 1):
+            output = cv2.pyrUp(output, dstsize=(
+                laplacian_tensor_list[n + 1][0].shape[1], laplacian_tensor_list[n + 1][0].shape[0]))
+        return motion_video_tensor[-1] + output
+
+    def build_gaussian_pyramid_last(self, src, level=3):
+        s = src.copy()
+        while level > 1:
+            s = cv2.pyrDown(s)
+            level -= 1
+        return s
+
+    def gaussian_video(self, video_tensor, levels=3):
+        vid_data = []
+        for frame in video_tensor.copy():
+            vid_data.append(self.build_gaussian_pyramid_last(frame, level=levels))
+        return np.array(vid_data)
+
+    @property
+    def frames(self):
+
+        for batch_frames_tensor, laplacian in self.get_batch_frames(self.batch_size):
+            mag_motion = self.magnify_motion(batch_frames_tensor, laplacian)
+            mag_color = self.magnify_color(motion_video_tensor=mag_motion, laplacian_tensor_list=laplacian)
+            mag_color = cv2.convertScaleAbs(mag_color)
+            yield cv2.convertScaleAbs(mag_motion[-1]), cv2.convertScaleAbs(batch_frames_tensor[-1]), mag_color
+
+    def show(self):
+        with VideoWriter('./magnify.mp4', fps=self.video.fps, ) as writer:
+
+            try:
+                for n, (frame, original, color) in enumerate(self.frames):
+                    h, w, z = frame.shape
+                    mask = Image.get_empty_image()
+                    mask.top.left = Image(frame).write_text(f'magnified {(self.low, self.high, self.amplification)}')
+                    mask.bottom = Image(original).write_text('Original')
+                    mask.top.right = Image(color).write_text('Color')
+                    writer.add_frame(mask)
+                    cv2.imshow("Video", Image(mask).write_text(f'Frame: {n + 1} - FPS {self.video.fps}'))
+                    if self.video.is_break_view:
+                        break
+            finally:
+                self.video.stop()
+                cv2.destroyAllWindows()
+        # try:
+        #     for n, frame in enumerate(self.frames):
+        #         cv2.imshow("Video", Image(frame).write_text(f'Frame: {n + 1} - FPS {self.video.fps}'))
+        #         if self.video.is_break_view:
+        #             break
+        # finally:
+        #     self.video.stop()
+        #     cv2.destroyAllWindows()
