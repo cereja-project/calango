@@ -266,8 +266,7 @@ class Image(np.ndarray):
             self._color_mode = 'BGR'
             self[:, ] = cv2.cvtColor(self, cv2.COLOR_RGBA2BGR)
         elif self._color_mode == 'BGRA':
-            self._color_mode = 'BGR'
-            self[:, ] = cv2.cvtColor(self, cv2.COLOR_BGRA2BGR)
+            return Image(cv2.cvtColor(self.copy(), cv2.COLOR_BGRA2BGR))
         return self
 
     def resize(self, shape: Union[tuple, list], keep_scale: bool = False) -> Image:
@@ -756,7 +755,7 @@ class Screen(_IVideo):
         from mss import mss
         with mss() as sct:
             while self._capture:
-                yield Image(np.array(sct.grab(self._mon)), 'RGB').rgb_to_bgr().bgr_to_rgb().data
+                yield Image(np.array(sct.grab(self._mon)), 'RGBA').rgb_to_bgr()
 
     @property
     def total_frames(self) -> int:
