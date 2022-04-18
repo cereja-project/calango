@@ -14,7 +14,6 @@ import numpy as np
 import logging
 from matplotlib import pyplot as plt
 
-
 from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
 
@@ -479,8 +478,8 @@ class Image(np.ndarray):
 
 
 class VideoWriter:
-    def __init__(self, p, width=None, height=None, fps=30):
-        self._fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    def __init__(self, p, fourcc=None, width=None, height=None, fps=30):
+        self._fourcc = -1 if fourcc is None else cv2.VideoWriter_fourcc(*fourcc) if isinstance(fourcc, str) else fourcc
         self._height, self._width = width, height
         self._path = p
         self.__writer = None
@@ -502,8 +501,8 @@ class VideoWriter:
         return self.__writer
 
     @classmethod
-    def write_frames(cls, p, frames, fps=30, width=None, height=None):
-        with cls(p, width=width, height=height, fps=fps) as video:
+    def write_frames(cls, p, frames, fps=30, width=None, height=None, fourcc=None):
+        with cls(p, fourcc=fourcc, width=width, height=height, fps=fps) as video:
             for frame in frames:
                 if isinstance(frame, (str, cj.Path)):
                     frame = cv2.imread(cj.Path(frame).path)
@@ -555,6 +554,7 @@ class _IVideo:
         pass
 
     @property
+    @abstractmethod
     def is_stream(self) -> bool:
         pass
 
@@ -978,8 +978,8 @@ class Video:
                 self.stop()
                 break
 
-    def save(self, file_path, n_frames=None):
-        VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps)
+    def save(self, file_path, fourcc=None, n_frames=None):
+        VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps, fourcc=fourcc)
 
     def show(self):
         if ON_COLAB_JUPYTER:
@@ -1094,7 +1094,8 @@ class VideoMagnification:
     def magnify_motion(self, video_tensor, laplacian_tensor_list):
         filter_tensor_list = []
         for lap in laplacian_tensor_list:
-            filter_tensor = self.butter_bandpass_filter(lap, 0.4, 0.8, int(self.video.fps), order=len(laplacian_tensor_list))
+            filter_tensor = self.butter_bandpass_filter(lap, 0.4, 0.8, int(self.video.fps),
+                                                        order=len(laplacian_tensor_list))
             filter_tensor *= 150
             filter_tensor_list.append(filter_tensor)
         recon = self.reconstract_from_tensorlist(filter_tensor_list)
