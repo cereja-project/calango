@@ -502,11 +502,14 @@ class VideoWriter:
 
     @classmethod
     def write_frames(cls, p, frames, fps=30, width=None, height=None, fourcc=None):
-        with cls(p, fourcc=fourcc, width=width, height=height, fps=fps) as video:
-            for frame in frames:
-                if isinstance(frame, (str, cj.Path)):
-                    frame = cv2.imread(cj.Path(frame).path)
-                video.add_frame(frame)
+        with cj.TempDir() as tmp_dir:
+            tmp_path = tmp_dir.path.join(cj.Path(p).name)
+            with cls(tmp_path.path, fourcc=fourcc, width=width, height=height, fps=fps) as video:
+                for frame in frames:
+                    if isinstance(frame, (str, cj.Path)):
+                        frame = cv2.imread(cj.Path(frame).path)
+                    video.add_frame(frame)
+            tmp_path.mv(p)
 
     def __enter__(self, *args, **kwargs):
         self._with_context = True
@@ -978,8 +981,11 @@ class Video:
                 self.stop()
                 break
 
-    def save(self, file_path, fourcc=None, n_frames=None):
+    def _save(self, file_path, n_frames=None, fourcc=None):
         VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps, fourcc=fourcc)
+
+    def save(self, file_path, n_frames=None, fourcc=None):
+        threading.Thread(target=self._save, args=(file_path, n_frames, fourcc)).start()
 
     def show(self):
         if ON_COLAB_JUPYTER:
