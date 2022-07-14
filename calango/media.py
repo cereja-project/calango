@@ -981,11 +981,30 @@ class Video:
                 self.stop()
                 break
 
+    def _cut(self, start, end=None, step=1):
+        assert not self._cap.is_webcam, 'Not available for webcam'
+        assert not self._th_show_running, "The video is showing, so you can't get frames"
+        if not self.is_opened:
+            self._build()
+        filter_map = set(range(start, end or self.total_frames, step))
+        max_frame = max(filter_map)
+        for frame in self.get_frames():
+            if self.current_number_frame > max_frame:
+                self.stop()
+            if self.current_number_frame in filter_map:
+                yield frame
+
+    def cut(self, start, end, step=1):
+        return Video(list(self._cut(start, end, step=step)), fps=self.fps)
+
     def _save(self, file_path, n_frames=None, fourcc=None):
         VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps, fourcc=fourcc)
 
-    def save(self, file_path, n_frames=None, fourcc=None):
-        threading.Thread(target=self._save, args=(file_path, n_frames, fourcc)).start()
+    def save(self, file_path, n_frames=None, fourcc=None, use_thread=True):
+        if use_thread:
+            threading.Thread(target=self._save, args=(file_path, n_frames, fourcc)).start()
+            return
+        self._save(file_path, n_frames, fourcc)
 
     def show(self):
         if ON_COLAB_JUPYTER:
@@ -1017,7 +1036,7 @@ class Video:
         size_number = len(str(_frame_count))
         max_frame = max(filter_map)
         for frame in self.get_frames():
-            if not (self.current_number_frame < max_frame):
+            if self.current_number_frame > max_frame:
                 break
             prefix = cj.get_zero_mask(self.current_number_frame, size_number)
             if self.current_number_frame in filter_map:
