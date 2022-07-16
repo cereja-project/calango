@@ -1063,9 +1063,12 @@ class Video:
 
     def __getitem__(self, item):
         if isinstance(item, int):
-            self._cut(item)
+            start, end, step = item, item+1, 1
         elif isinstance(item, slice):
-            pass
+            start, end, step = item.start, item.stop, item.step or 1
+        else:
+            raise IndexError("Value is not valid")
+        return self.cut(start, end, step)
 
 
 class VideoMagnification:
