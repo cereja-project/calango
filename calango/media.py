@@ -880,6 +880,11 @@ class Video:
     def is_opened(self):
         return self._cap.is_opened
 
+    @property
+    def current_time(self):
+        """returns timesec for"""
+        return round((1 / self._cap.fps) * self.current_number_frame, 2)
+
     def set_start_on_time(self, _time='00:00:00'):
         h, m, s = time.strptime(_time, '%H:%M:%S')[-6:-3]
         h *= 3600
@@ -889,6 +894,8 @@ class Video:
             self._cap.set(cv2.CAP_PROP_POS_MSEC, seconds * 1000)
         self._current_number_frame = int(round(seconds * self.fps))
         self._count_frames = self._current_number_frame
+        self._fps_time = 0
+        self._t0 = None
 
     def get_batch_frames(self, kernel_size, strides=1, take_number_frame=False):
         batch_frames = []
@@ -1053,6 +1060,12 @@ class Video:
 
     def stop(self):
         self._cap.stop()
+
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            self._cut(item)
+        elif isinstance(item, slice):
+            pass
 
 
 class VideoMagnification:
