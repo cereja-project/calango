@@ -1007,33 +1007,27 @@ class Video:
     def _save(self, file_path, n_frames=None, fourcc=None):
         VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps, fourcc=fourcc)
 
-    def save(self, file_path, n_frames=None, fourcc=None, use_thread=True):
+    def save(self, file_path, n_frames=None, fourcc=None, use_thread=False):
         if use_thread:
             threading.Thread(target=self._save, args=(file_path, n_frames, fourcc)).start()
             return
-        self._save(file_path, n_frames, fourcc)
+        self._save(file_path, n_frames=n_frames, fourcc=fourcc)
 
     def show(self):
         if ON_COLAB_JUPYTER:
             with cj.system.TempDir() as dir_path:
                 video_path = dir_path.path.join(f'{self._cap.name}.mp4')
-                self.save_frames(dir_path.path)
-
-                subprocess.run(
-                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{max(len(str(self.total_frames)), 3)}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                ).check_returncode()
+                self.save(dir_path.path, fourcc='XVID', use_thread=False)
                 if video_path.exists:
                     return show_local_mp4(video_path.path)
                 raise Exception("Error on show video.")
         else:
             if self._th_show_running:
-                return
+                self.stop()
             if self._th_show is not None:
                 self._th_show.join()
                 self._build()
-            self._th_show = threading.Thread(target=self._show, daemon=True)
+            self._th_show = threading.Thread(target=self._show, daemon=False)
             self._th_show.start()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='jpg', limit_web_cam=500):
