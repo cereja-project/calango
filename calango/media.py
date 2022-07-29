@@ -1017,7 +1017,7 @@ class Video:
         if ON_COLAB_JUPYTER:
             with cj.system.TempDir() as dir_path:
                 video_path = dir_path.path.join(f'{self._cap.name}.mp4')
-                self.save(dir_path.path, fourcc='XVID', use_thread=False)
+                self.save(video_path.path, fourcc='mp4v', use_thread=False)
                 if video_path.exists:
                     return show_local_mp4(video_path.path)
                 raise Exception("Error on show video.")
