@@ -1027,7 +1027,7 @@ class Video:
             if self._th_show is not None:
                 self._th_show.join()
                 self._build()
-            self._th_show = threading.Thread(target=self._show, daemon=False)
+            self._th_show = threading.Thread(target=self._show, daemon=True)
             self._th_show.start()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='jpg', limit_web_cam=500):
