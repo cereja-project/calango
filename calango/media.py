@@ -498,6 +498,7 @@ class VideoWriter:
     def _writer(self):
         if self.__writer is None or not self.__writer.isOpened():
             self.__writer = cv2.VideoWriter(self._path, self._fourcc, self._fps, (self._width, self._height))
+            assert self.__writer.isOpened(), 'Error on create VideoWriter, verify decoder.'
         return self.__writer
 
     @classmethod
@@ -1013,11 +1014,17 @@ class Video:
             return
         self._save(file_path, n_frames=n_frames, fourcc=fourcc)
 
-    def show(self):
+    def show(self, daemon=False):
         if ON_COLAB_JUPYTER:
             with cj.system.TempDir() as dir_path:
                 video_path = dir_path.path.join(f'{self._cap.name}.mp4')
-                self.save(video_path.path, fourcc='mp4v', use_thread=False)
+                self.save_frames(dir_path.path)
+
+                subprocess.run(
+                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{max(len(str(self.total_frames)), 3)}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                ).check_returncode()
                 if video_path.exists:
                     return show_local_mp4(video_path.path)
                 raise Exception("Error on show video.")
@@ -1027,7 +1034,7 @@ class Video:
             if self._th_show is not None:
                 self._th_show.join()
                 self._build()
-            self._th_show = threading.Thread(target=self._show, daemon=True)
+            self._th_show = threading.Thread(target=self._show, daemon=daemon)
             self._th_show.start()
 
     def save_frames(self, p: str, start=1, end=None, step=1, img_format='jpg', limit_web_cam=500):
@@ -1057,7 +1064,7 @@ class Video:
 
     def __getitem__(self, item):
         if isinstance(item, int):
-            start, end, step = item, item+1, 1
+            start, end, step = item, item + 1, 1
         elif isinstance(item, slice):
             start, end, step = item.start, item.stop, item.step or 1
         else:
