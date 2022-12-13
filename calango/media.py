@@ -706,7 +706,7 @@ class _FrameSequence(_IVideo):
 
     @classmethod
     def load_from_dir(cls, p):
-        paths = cj.Path(p).list_dir()
+        paths = sorted(cj.Path(p).list_dir(), key=lambda x: x.path)
         obj = cls(cls._read_images_paths(paths))
         obj._total_frames = len(paths)
         return obj
@@ -1021,7 +1021,7 @@ class Video:
                 self.save_frames(dir_path.path)
 
                 subprocess.run(
-                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{max(len(str(self.total_frames)), 3)}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
+                        f'ffmpeg -f image2 -i "{dir_path.path}"/%0{len(str(self.total_frames))}d.jpg -y "{video_path.path}" -hide_banner -loglevel panic',
                         shell=True,
                         stdout=subprocess.PIPE,
                 ).check_returncode()
