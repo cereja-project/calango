@@ -860,6 +860,9 @@ class Video:
             self._t0 = time.time()
             self._fps_time = self._t0  # for fps on show
         _, image = self._cap.next_frame
+        if image is None:
+            self.stop()
+            return None
         image = self._frame_func_preprocess(Image(image))
         if not isinstance(image, Image):
             image = Image(image)
@@ -911,7 +914,7 @@ class Video:
 
     @property
     def fps(self):
-        if self._th_show_running and not self._cap.is_webcam:
+        if self._th_show_running:
             time_it = (time.time() - self._fps_time)
             if time_it >= 1:
                 return self._count_frames / time_it
