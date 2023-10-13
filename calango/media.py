@@ -258,6 +258,16 @@ class Image(np.ndarray):
             return Image(cv2.cvtColor(self, code_))
         return self
 
+    def gray_to_bgr(self) -> Image:
+        self[:, ] = cv2.cvtColor(self, cv2.COLOR_GRAY2BGR)
+        self._color_mode = "BGR"
+        return self
+
+    def gray_to_rgb(self) -> Image:
+        self[:, ] = cv2.cvtColor(self, cv2.COLOR_GRAY2RGB)
+        self._color_mode = "RGB"
+        return self
+
     def rgb_to_bgr(self) -> Image:
         if self._color_mode == 'RGB':
             self._color_mode = 'BGR'
@@ -306,6 +316,24 @@ class Image(np.ndarray):
         end = right[0], bottom[-1]
 
         return Image(cv2.resize(im_crop[start[1]:end[1], start[0]:end[0]], (new_w, new_h)))
+
+    @staticmethod
+    def remove_shadow(image):
+        if image.shape[-1] > 1:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # 2. Apply bilateral filter to smooth the image
+        bilateral = cv2.bilateralFilter(image, 15, 75, 75)
+
+        # 3. Compute the background using morphological closing
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+        background = cv2.morphologyEx(bilateral, cv2.MORPH_CLOSE, kernel)
+
+        # 4. Compute the ratio of the grayscale and background image to remove shadows
+        ratio = (image.astype('float') / background.astype('float')) * 255.0
+        shadow_removed = np.clip(ratio, 0, 255).astype('uint8')
+
+        return shadow_removed
 
     def prune(self) -> Image:
         min_len = self.min_len
