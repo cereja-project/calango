@@ -2,3 +2,4 @@ cereja
 opencv-python
 matplotlib
 numpy
+scikit-learn

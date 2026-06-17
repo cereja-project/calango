@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 import logging
 from matplotlib import pyplot as plt
+from sklearn.cluster import KMeans
 
 from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
@@ -520,7 +521,43 @@ class Image(np.ndarray):
     def save(self, p: str):
         cv2.imwrite(p, self)
         assert cj.Path(p).exists, f'Error saving image {p}'
+    def get_background_foreground_colors(self, k=2):
+        """
+        Função para determinar as cores RGB do background e do foreground em uma imagem.
 
+        Parâmetros:
+            image (np.array): imagem em formato de array numpy.
+            k (int): número de clusters para segmentação de cores (2 significa fundo e primeiro plano).
+
+        Retorna:
+            dict: dicionário com as cores RGB do background e do foreground.
+        """
+
+        # Redimensiona a imagem para acelerar o processamento
+        resize_dim = (300, 300)
+        image_resized = cv2.resize(self, resize_dim)
+        image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+
+        # Converte a imagem para um array de pixels
+        pixels = image_rgb.reshape(-1, 3)
+
+        # Aplica KMeans para segmentar em duas cores (background e foreground)
+        kmeans = KMeans(n_clusters=k, random_state=0)
+        kmeans.fit(pixels)
+
+        # Obtém as cores dos clusters
+        cluster_colors = kmeans.cluster_centers_
+        cluster_labels, counts = np.unique(kmeans.labels_, return_counts=True)
+
+        # Identifica o background como a cor com mais pixels
+        background_idx = cluster_labels[np.argmax(counts)]
+        foreground_idx = cluster_labels[np.argmin(counts)]
+
+        # Converte as cores para inteiros RGB
+        background_rgb = tuple(map(int, cluster_colors[background_idx]))
+        foreground_rgb = tuple(map(int, cluster_colors[foreground_idx]))
+
+        return {"background_rgb": background_rgb, "foreground_rgb": foreground_rgb}
     def plot_colors_histogram(self):
         # tuple to select colors of each channel line
         colors = ("red", "green", "blue") if self._color_mode == 'RGB' else ('blue', 'green', 'red')
@@ -646,6 +683,24 @@ class Image(np.ndarray):
     def images_from_dir(cls, dir_path, ext='.jpg'):
         dir_path = cj.Path(dir_path)
         return [cls(im_p.path) for im_p in dir_path.list_files(ext=ext)]
+
+    @classmethod
+    def _get_image_from_window(cls):
+        with cj.TempDir() as tmp:
+            while True:
+                window = yield
+                p = tmp.path.join('frame.bmp')
+                window.capture_image_bmp(p.path)
+                yield Image(p.path)
+
+    @classmethod
+    def from_window(cls, window: cj.Window) -> 'Image':
+        """
+        Get image from window
+        """
+        gen = cls._get_image_from_window()
+        next(gen)
+        return gen.send(window)
 
 
 class VideoWriter:
@@ -957,6 +1012,63 @@ class Screen(_IVideo):
         self._capture = False
 
 
+class WindowStream(_IVideo):
+
+    def __init__(self, window: cj.Window, *args, fps=None, **kwargs):
+        self._window = window
+        self._fps = fps or 30
+        self._total_frames = -1
+        self._capture = True
+        self._frames = self.__get_frame()
+        self._width, self._height = self._window.size
+
+    def set_fps(self, fps: Union[int, float]) -> None:
+        assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
+        self._fps = fps
+
+    @property
+    def next_frame(self) -> Tuple[bool, Union[np.ndarray, None]]:
+        return True, next(self._frames)
+
+    def __get_frame(self):
+        with cj.TempDir() as tmp:
+            while self._capture:
+                p = tmp.path.join('frame.bmp')
+                self._window.capture_image_bmp(p.path)
+                yield Image(p.path)
+
+    @property
+    def width(self) -> int:
+        return self._window.size[0]
+
+    @property
+    def height(self) -> int:
+        return self._window.size[1]
+
+    @property
+    def total_frames(self) -> int:
+        return self._total_frames
+
+    @property
+    def fps(self) -> Union[int, float]:
+        return self._fps
+
+    @property
+    def is_webcam(self) -> bool:
+        return True
+
+    @property
+    def is_stream(self) -> bool:
+        return False
+
+    @property
+    def is_opened(self) -> bool:
+        return self._capture
+
+    def stop(self):
+        self._capture = False
+
+
 class Video:
 
     def __init__(self, *args, fps=None, frame_preprocess=None, **kwargs):
@@ -976,7 +1088,9 @@ class Video:
 
     def _build(self):
         if len(self._args):
-            if isinstance(self._args[0], str):
+            if isinstance(self._args[0], cj.Window):
+                self._cap = WindowStream(window=self._args[0], *self._args[1:], **self._kwargs)
+            elif isinstance(self._args[0], str):
                 if self._args[0] == 'monitor':
                     self._cap = Screen()
                 elif cj.request.is_url(self._args[0]):
