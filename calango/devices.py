@@ -24,19 +24,18 @@ SOFTWARE.
 from typing import Tuple, Union
 import cereja as cj
 
-try:
-    import pyautogui
-
-    pyautogui_available = True
-except:
-    pyautogui_available = False
-
 __all__ = ['Mouse']
 
 
 class Mouse:
     def __init__(self, jump=5, reduce_noise=True, noise_threshold=3):
-        assert pyautogui_available, "invalid environment"
+        # PyAutoGUI changes process DPI settings during import on Windows.
+        # Load it only for the legacy automation API, never for recording.
+        try:
+            import pyautogui
+        except ImportError as exc:
+            raise ImportError('Mouse automation requires pyautogui. Install it with: pip install pyautogui') from exc
+        self._backend = pyautogui
         self._jump = jump
         self._last_position = None
         self._reduce_noise = reduce_noise
@@ -48,7 +47,7 @@ class Mouse:
         Get window Width and Height.
         :return: (w, h)
         """
-        w, h = pyautogui.size()
+        w, h = self._backend.size()
         return w, h
 
     @property
@@ -69,7 +68,7 @@ class Mouse:
 
     @property
     def position(self):
-        return pyautogui.mouseinfo.position()
+        return self._backend.position()
 
     @position.setter
     def position(self, value: Tuple[Union[int, float], Union[int, float]]):
@@ -82,7 +81,7 @@ class Mouse:
             if distance <= self._noise_threshold:
                 return
         self._last_position = self.position
-        pyautogui.moveTo(x, y)
+        self._backend.moveTo(x, y)
 
     def _get_jump(self, jump):
         if not isinstance(jump, (int, float)):
@@ -141,7 +140,7 @@ class Mouse:
         self.position = 1, 1
 
     def _click(self, button: str, n_clicks: int, **kwargs):
-        pyautogui.click(*self.position, button=button, clicks=n_clicks, **kwargs)
+        self._backend.click(*self.position, button=button, clicks=n_clicks, **kwargs)
 
     def click_left(self, n_clicks=1, **kwargs):
         self._click('left', n_clicks=n_clicks, **kwargs)

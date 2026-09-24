@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import math
 import subprocess
+import sys
 import threading
 import time
 from abc import abstractmethod
@@ -15,7 +16,6 @@ import logging
 from matplotlib import pyplot as plt
 from sklearn.cluster import KMeans
 
-from .devices import Mouse
 from .settings import ON_COLAB_JUPYTER
 
 __all__ = ['Image', 'Video', 'VideoWriter']
@@ -705,26 +705,44 @@ class Image(np.ndarray):
 
 class VideoWriter:
     def __init__(self, p, fourcc=None, width=None, height=None, fps=30):
+        if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError('fps must be a finite positive number')
+        for name, value in (('width', width), ('height', height)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+                raise ValueError(f'{name} must be a positive integer')
+        if isinstance(fourcc, str) and len(fourcc) != 4:
+            raise ValueError('fourcc must contain exactly four characters')
         self._fourcc = -1 if fourcc is None else cv2.VideoWriter_fourcc(*fourcc) if isinstance(fourcc, str) else fourcc
-        self._height, self._width = width, height
-        self._path = p
+        self._height, self._width = height, width
+        self._path = str(p)
         self.__writer = None
         self._fps = fps
         self._with_context = False
 
     def add_frame(self, frame):
-        assert self._with_context, """Use with context eg.
-    with VideoWriter('path/to/video.avi', fps=30) as video:
-        video.write(frame)"""
-        if self._width is None or self._height is None:
-            self._height, self._width, _ = frame.shape
-        self._writer.write(frame)
+        if not self._with_context:
+            raise RuntimeError('Use VideoWriter as a context manager before adding frames')
+        if not isinstance(frame, np.ndarray) or frame.dtype != np.uint8:
+            raise ValueError('Frames must be uint8 NumPy arrays')
+        if frame.ndim != 3 or frame.shape[2] != 3 or min(frame.shape[:2]) <= 0:
+            raise ValueError('Frames must have shape (height, width, 3) in BGR order')
+        height, width = frame.shape[:2]
+        if self._width is None:
+            self._width = width
+        if self._height is None:
+            self._height = height
+        if (width, height) != (self._width, self._height):
+            raise ValueError(f'Frame size {(width, height)} does not match {(self._width, self._height)}')
+        self._writer.write(np.ascontiguousarray(frame))
 
     @property
     def _writer(self):
-        if self.__writer is None or not self.__writer.isOpened():
-            self.__writer = cv2.VideoWriter(self._path, self._fourcc, self._fps, (self._width, self._height))
-            assert self.__writer.isOpened(), 'Error on create VideoWriter, verify decoder.'
+        if self.__writer is None:
+            writer = cv2.VideoWriter(self._path, self._fourcc, self._fps, (self._width, self._height))
+            if not writer.isOpened():
+                writer.release()
+                raise RuntimeError('Cannot open video output; check the path and codec')
+            self.__writer = writer
         return self.__writer
 
     @classmethod
@@ -734,17 +752,24 @@ class VideoWriter:
             with cls(tmp_path.path, fourcc=fourcc, width=width, height=height, fps=fps) as video:
                 for frame in frames:
                     if isinstance(frame, (str, cj.Path)):
-                        frame = cv2.imread(cj.Path(frame).path)
+                        frame = cv2.imread(str(frame))
                     video.add_frame(frame)
-            tmp_path.mv(p)
+            if tmp_path.exists:
+                tmp_path.mv(p)
 
     def __enter__(self, *args, **kwargs):
+        if self._with_context:
+            raise RuntimeError('VideoWriter is already open')
         self._with_context = True
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._with_context = False
-        self._writer.release()
+        if self.__writer is not None:
+            try:
+                self.__writer.release()
+            finally:
+                self.__writer = None
 
 
 class _IVideo:
@@ -812,13 +837,15 @@ class _IVideo:
             cv2.destroyAllWindows()
 
 
-class _VideoCV2(cv2.VideoCapture, _IVideo):
+class _VideoCV2(_IVideo):
 
     def __init__(self, *args, fps=None, **kwargs):
         self._is_webcam = not bool(args and isinstance(args[0], str))
         self._is_stream = cj.request.is_url(args[0]) if not self._is_webcam else False
         args = (*args, cv2.CAP_DSHOW) if self._is_webcam else args
-        super().__init__(*args, **kwargs)
+        # OpenCV's extension type can crash during subclass cleanup on Python 3.11.
+        # Keep native lifetime management inside the unmodified VideoCapture type.
+        self._capture = cv2.VideoCapture(*args, **kwargs)
         if fps is not None:
             self.set(cv2.CAP_PROP_FPS, fps)
         elif self.get(cv2.CAP_PROP_FPS) == 0:
@@ -826,6 +853,9 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
         self._fps = self.get(cv2.CAP_PROP_FPS)
         self._total_frames = -1 if self._is_webcam else int(self.get(cv2.CAP_PROP_FRAME_COUNT))
         self._width, self._height = int(self.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, '_capture'), name)
 
     @property
     def height(self) -> int:
@@ -957,59 +987,109 @@ class _FrameSequence(_IVideo):
 
 
 class Screen(_IVideo):
-    def __init__(self, *args, fps=30, **kwargs):
-        mouse = Mouse(*args, **kwargs)
+    """Compatibility frame source backed by Cereja on Windows."""
 
-        self._width, self._height = mouse.window_size
-        self._mon = {'left': 0, 'top': 0, 'width': self._width, 'height': self._height}
-        self._capture = True
-        self._frames = self.__get_frames()
-        self._fps = fps
+    def __init__(self, *, fps=30, monitor=None, region=None, include_cursor=True):
+        self.set_fps(30 if fps is None else fps)
+        self._monitor = monitor
+        self._region = region
+        self._include_cursor = include_cursor
+        self._stop_event = threading.Event()
+        self._stopped_at = None
+        self._reader = None
+        self._reader_thread = None
+        if sys.platform == 'win32':
+            try:
+                from cereja.system import ScreenCapture
+            except ImportError as exc:
+                raise ImportError('Screen recording needs the Cereja ScreenCapture API; install the matching Cereja checkout') from exc
+            self._capture_type = ScreenCapture
+            with ScreenCapture(include_cursor=False) as capture:
+                monitors = capture.list_monitors()
+            selected = next((m for m in monitors if m.id == getattr(monitor, 'id', monitor)), None) if monitor else None
+            if monitor is not None and selected is None:
+                raise ValueError('Unknown monitor')
+            selected = selected or next((m for m in monitors if m.is_primary), monitors[0] if monitors else None)
+            if selected is None:
+                raise RuntimeError('No display monitors available')
+            self._width, self._height = (region[2], region[3]) if region is not None else (selected.width, selected.height)
+        else:
+            # Preserve the existing optional MSS path outside Windows.
+            from mss import mss
+            self._capture_type = mss
+            with mss() as capture:
+                self._mon = capture.monitors[1]
+            self._width, self._height = self._mon['width'], self._mon['height']
 
-    def set_fps(self, fps: Union[int, float]) -> None:
-        assert isinstance(fps, (int, float)), ValueError(f'{fps} value for fps is not valid. Send int or float.')
+    def set_fps(self, fps):
+        if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError('fps must be a finite positive number')
         self._fps = fps
 
     @property
-    def width(self) -> int:
+    def width(self):
         return self._width
 
     @property
-    def height(self) -> int:
+    def height(self):
         return self._height
 
     @property
-    def next_frame(self) -> Tuple[bool, Union[np.ndarray, None]]:
-        return True, next(self._frames)
+    def next_frame(self):
+        if self._stop_event.is_set():
+            self.close_reader()
+            return False, None
+        owner = threading.get_ident()
+        if self._reader is None:
+            options = {'include_cursor': self._include_cursor} if sys.platform == 'win32' else {}
+            self._reader = self._capture_type(**options)
+            self._reader_thread = owner
+        elif owner != self._reader_thread:
+            raise RuntimeError('Screen frames must be consumed on one thread')
+        try:
+            if sys.platform == 'win32':
+                frame = self._reader.grab(monitor=self._monitor, region=self._region)
+                data = np.frombuffer(frame.bgra, dtype=np.uint8).reshape(frame.height, frame.width, 4)
+            else:
+                data = np.asarray(self._reader.grab(self._mon))
+            return True, Image(np.ascontiguousarray(data[:, :, :3]), 'BGR')
+        except BaseException:
+            self.close_reader()
+            raise
 
-    def __get_frames(self):
-        from mss import mss
-        with mss() as sct:
-            while self._capture:
-                yield Image(np.array(sct.grab(self._mon)), 'RGBA').rgb_to_bgr()
+    def close_reader(self):
+        if self._reader is not None and self._reader_thread == threading.get_ident():
+            try:
+                self._reader.close()
+            finally:
+                self._reader = None
+                self._reader_thread = None
 
     @property
-    def total_frames(self) -> int:
+    def total_frames(self):
         return -1
 
     @property
-    def fps(self) -> Union[int, float]:
+    def fps(self):
         return self._fps
 
     @property
-    def is_webcam(self) -> bool:
+    def is_webcam(self):
         return True
 
     @property
-    def is_stream(self) -> bool:
+    def is_stream(self):
         return False
 
     @property
-    def is_opened(self) -> bool:
-        return self._capture
+    def is_opened(self):
+        return not self._stop_event.is_set()
 
     def stop(self):
-        self._capture = False
+        if not self._stop_event.is_set():
+            self._stopped_at = time.monotonic()
+            self._stop_event.set()
+        self.close_reader()
 
 
 class WindowStream(_IVideo):
@@ -1088,11 +1168,9 @@ class Video:
 
     def _build(self):
         if len(self._args):
-            if isinstance(self._args[0], cj.Window):
-                self._cap = WindowStream(window=self._args[0], *self._args[1:], **self._kwargs)
-            elif isinstance(self._args[0], str):
+            if isinstance(self._args[0], str):
                 if self._args[0] == 'monitor':
-                    self._cap = Screen()
+                    self._cap = Screen(**self._kwargs)
                 elif cj.request.is_url(self._args[0]):
                     self._cap = _VideoCV2(*self._args, **self._kwargs)
                 else:
@@ -1109,6 +1187,8 @@ class Video:
                     self._cap = _FrameSequence.load_from_paths(self._args[0])
                 if isinstance(self._args[0], (list, np.ndarray, Iterator)):
                     self._cap = _FrameSequence(self._args[0])
+            elif isinstance(self._args[0], getattr(cj, 'Window', ())):
+                self._cap = WindowStream(window=self._args[0], *self._args[1:], **self._kwargs)
             else:
                 raise ValueError('Error on build Video. Arguments is invalid.')
         else:
@@ -1259,23 +1339,32 @@ class Video:
         except Exception as e:
             logging.warning(e)
             self.stop()
-        self._th_show_running = False
+        finally:
+            try:
+                if isinstance(self._cap, Screen):
+                    self._cap.close_reader()
+            finally:
+                self._th_show_running = False
 
     def get_frames(self, n_frames=None):
         assert not self._th_show_running, "The video is showing, so you can't get frames"
         if not self.is_opened:
             self._build()
 
-        while self.is_opened:
-            frame = self.__get_next_frame()
-            if frame is None:
-                continue
-            yield frame
-            if n_frames is not None:
-                n_frames -= 1
-            if n_frames == 0:
-                self.stop()
-                break
+        try:
+            while self.is_opened:
+                frame = self.__get_next_frame()
+                if frame is None:
+                    continue
+                yield frame
+                if n_frames is not None:
+                    n_frames -= 1
+                if n_frames == 0:
+                    self.stop()
+                    break
+        finally:
+            if isinstance(self._cap, Screen):
+                self._cap.close_reader()
 
     def _cut(self, start, end=None, step=1):
         assert not self._cap.is_webcam, 'Not available for webcam'
@@ -1294,6 +1383,23 @@ class Video:
         return Video(list(self._cut(start, end, step=step)), fps=self.fps)
 
     def _save(self, file_path, n_frames=None, fourcc=None):
+        if isinstance(self._cap, Screen):
+            from ._recording import write_timed_frames, pad_to_even
+            if self._th_show_running:
+                raise RuntimeError('Stop the video preview before saving')
+            if not self.is_opened:
+                self._build()
+            try:
+                with VideoWriter(file_path, fps=self._cap.fps, fourcc=fourcc or 'mp4v') as writer:
+                    write_timed_frames(
+                        self.__get_next_frame, lambda frame: writer.add_frame(pad_to_even(frame)),
+                        fps=self._cap.fps, stop_event=self._cap._stop_event,
+                        stop_time=lambda: self._cap._stopped_at, n_frames=n_frames,
+                    )
+            finally:
+                self.stop()
+                self._cap.close_reader()
+            return
         VideoWriter.write_frames(file_path, self.get_frames(n_frames=n_frames), fps=self._cap.fps, fourcc=fourcc)
 
     def save(self, file_path, n_frames=None, fourcc=None, use_thread=False):

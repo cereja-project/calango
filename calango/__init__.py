@@ -21,12 +21,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
-from cereja.utils import get_version_pep440_compliant
+from ._version import VERSION, __version__
 from . import settings
 from .devices import Mouse
 from .media import Image, VideoWriter, Video
-
-
-VERSION = "2.2.9.final.0"
-
-__version__ = get_version_pep440_compliant(VERSION)
+from .recorder import ScreenRecorder

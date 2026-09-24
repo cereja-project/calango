@@ -8,13 +8,40 @@ It looks like magic
 
 ## Get started
 
+Calango 2.3.0 requires Python 3.11 or newer and Cereja 2.3.0 or newer.
+
 Install with pip
 
-`pip install calango`
+`pip install "calango>=2.3.0"`
 
 or
 
-`python -m pip install calango`
+`python -m pip install "calango>=2.3.0"`
+
+If these versions are not yet available on PyPI, use the
+[development installation](docs/screen_recorder.md#development-installation).
+Release preparation is described in the [release guide](docs/releases.md).
+
+## Screen recorder (Windows)
+
+Calango provides a Tkinter recorder for Windows 10/11: choose a monitor, region,
+or window and save silent MP4 video at 15 or 30 FPS. Window capture works in the
+background without capturing covering windows; monitor/region capture can include
+the cursor.
+The GUI is launched explicitly and is never opened by importing the package.
+
+```text
+calango-recorder
+python -m calango.gui
+```
+
+The recorder is introduced in Calango 2.3.0. Its package dependency on
+`cereja>=2.3.0` supplies the native `ScreenCapture` API, including background
+window capture. See [installation, API and validation](docs/screen_recorder.md).
+
+Capture stays in Cereja (standard-library Win32); recording and encoding stay in
+Calango. The Windows recorder does not require MSS, PyAutoGUI or an external
+FFmpeg executable.
 
 ## Mouse Interface
 
