@@ -1,10 +1,6 @@
-import unittest
+"""Keep ``python -m unittest tests`` as the complete repository test command."""
+from pathlib import Path
 
 
-class TestCase(unittest.TestCase):
-    def test(self):
-        pass
-
-
-if __name__ == '__main__':
-    unittest.main()
+def load_tests(loader, tests, pattern):
+    return loader.discover(str(Path(__file__).parent), pattern or 'test_*.py')

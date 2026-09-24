@@ -1,4 +1,4 @@
-cereja
+cereja>=2.3.0
 opencv-python
 matplotlib
 numpy
