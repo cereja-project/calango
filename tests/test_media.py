@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 from calango import Image, Video, VideoWriter
-from calango.media import Screen
+from calango.media import Screen, _VideoCV2
 
 
 class TestVideoWriter(unittest.TestCase):
@@ -103,6 +103,29 @@ class FakeCapture:
         pixels[:, :, 0] = 255
         pixels[:, :, 3] = 255
         return SimpleNamespace(width=64, height=32, bgra=pixels.tobytes())
+
+
+class TestVideoCaptureAdapter(unittest.TestCase):
+    def test_native_read_seek_and_release_remain_available(self):
+        frame = np.zeros((12, 18, 3), dtype=np.uint8)
+        properties = {cv2.CAP_PROP_FPS: 15, cv2.CAP_PROP_FRAME_COUNT: 3,
+                      cv2.CAP_PROP_FRAME_WIDTH: 18, cv2.CAP_PROP_FRAME_HEIGHT: 12}
+        with mock.patch('calango.media.cv2.VideoCapture') as capture_type:
+            native = capture_type.return_value
+            native.get.side_effect = properties.__getitem__
+            native.read.return_value = (True, frame)
+            native.isOpened.return_value = True
+            capture = _VideoCV2('input.mp4')
+            capture_type.assert_called_once_with('input.mp4')
+            self.assertEqual((capture.width, capture.height, capture.fps, capture.total_frames), (18, 12, 15, 3))
+            self.assertTrue(capture.is_opened)
+            ok, received = capture.next_frame
+            self.assertTrue(ok)
+            self.assertIs(received, frame)
+            capture.set(cv2.CAP_PROP_POS_MSEC, 250)
+            native.set.assert_called_once_with(cv2.CAP_PROP_POS_MSEC, 250)
+            capture.stop()
+            native.release.assert_called_once_with()
 
 
 class TestScreenCompatibility(unittest.TestCase):
@@ -203,7 +226,7 @@ class TestScreenCompatibility(unittest.TestCase):
 class TestImports(unittest.TestCase):
     def test_import_does_not_load_automation_or_open_capture(self):
         code = "import calango, sys; assert 'pyautogui' not in sys.modules; assert 'mss' not in sys.modules"
-        result = subprocess.run([sys.executable, '-c', code], text=True, capture_output=True)
+        result = subprocess.run([sys.executable, '-X', 'faulthandler', '-c', code], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_file_and_frame_sources_do_not_load_windows_automation(self):
@@ -239,7 +262,7 @@ with tempfile.TemporaryDirectory() as directory:
 assert 'pyautogui' not in sys.modules
 assert 'mss' not in sys.modules
 '''
-        result = subprocess.run([sys.executable, '-c', code], text=True, capture_output=True)
+        result = subprocess.run([sys.executable, '-X', 'faulthandler', '-c', code], text=True, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_versions_remain_consistent(self):

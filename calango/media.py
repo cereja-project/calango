@@ -837,13 +837,15 @@ class _IVideo:
             cv2.destroyAllWindows()
 
 
-class _VideoCV2(cv2.VideoCapture, _IVideo):
+class _VideoCV2(_IVideo):
 
     def __init__(self, *args, fps=None, **kwargs):
         self._is_webcam = not bool(args and isinstance(args[0], str))
         self._is_stream = cj.request.is_url(args[0]) if not self._is_webcam else False
         args = (*args, cv2.CAP_DSHOW) if self._is_webcam else args
-        super().__init__(*args, **kwargs)
+        # OpenCV's extension type can crash during subclass cleanup on Python 3.11.
+        # Keep native lifetime management inside the unmodified VideoCapture type.
+        self._capture = cv2.VideoCapture(*args, **kwargs)
         if fps is not None:
             self.set(cv2.CAP_PROP_FPS, fps)
         elif self.get(cv2.CAP_PROP_FPS) == 0:
@@ -851,6 +853,9 @@ class _VideoCV2(cv2.VideoCapture, _IVideo):
         self._fps = self.get(cv2.CAP_PROP_FPS)
         self._total_frames = -1 if self._is_webcam else int(self.get(cv2.CAP_PROP_FRAME_COUNT))
         self._width, self._height = int(self.get(cv2.CAP_PROP_FRAME_WIDTH)), int(self.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, '_capture'), name)
 
     @property
     def height(self) -> int:
