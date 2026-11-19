@@ -15,6 +15,36 @@ from calango import Image, Video, VideoWriter
 from calango.media import Screen, _VideoCV2
 
 
+class TestImageCenterCrop(unittest.TestCase):
+    def setUp(self):
+        # Unique values make a lost row/column or interpolation observable.
+        self.pixels = np.arange(5 * 7 * 3, dtype=np.uint8).reshape(5, 7, 3)
+        self.image = Image(self.pixels)
+
+    def test_odd_crop_preserves_exact_center_pixels(self):
+        cropped = self.image.crop_by_center((3, 3))
+        self.assertIsInstance(cropped, Image)
+        np.testing.assert_array_equal(cropped, self.pixels[1:4, 2:5])
+
+    def test_single_pixel_crop_returns_center_pixel(self):
+        np.testing.assert_array_equal(self.image.crop_by_center((1, 1)),
+                                      self.pixels[2:3, 3:4])
+
+    def test_full_odd_size_crop_preserves_entire_image(self):
+        np.testing.assert_array_equal(self.image.crop_by_center((5, 7)), self.pixels)
+
+    def test_even_crop_keeps_existing_center_alignment_and_is_independent(self):
+        cropped = self.image.crop_by_center((2, 4))
+        np.testing.assert_array_equal(cropped, self.pixels[1:3, 1:5])
+        cropped[:] = 0
+        np.testing.assert_array_equal(self.image, self.pixels)
+
+    def test_default_crop_and_prune_preserve_odd_square_pixels(self):
+        expected = self.pixels[:, 1:6]
+        np.testing.assert_array_equal(self.image.crop_by_center(), expected)
+        np.testing.assert_array_equal(self.image.prune(), expected)
+
+
 class TestVideoWriter(unittest.TestCase):
     def test_rectangular_frames_round_trip(self):
         with tempfile.TemporaryDirectory() as folder:
