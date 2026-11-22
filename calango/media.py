@@ -446,10 +446,11 @@ class Image(np.ndarray):
         assert self.width >= new_w and self.height >= new_h, f'This is impossible because the image {self.shape} ' \
                                                              f'has proportions smaller than the size sent {size}'
         im_crop = self.copy()
-        bottom = (self.center_position[0], self.center_position[1] + new_h // 2)
+        # The exclusive end must include the extra pixel of odd-sized crops.
+        bottom = (self.center_position[0], self.center_position[1] + new_h - new_h // 2)
         top = (self.center_position[0], self.center_position[1] - new_h // 2)
         left = (self.center_position[0] - new_w // 2, self.center_position[1])
-        right = (self.center_position[0] + new_w // 2, self.center_position[1])
+        right = (self.center_position[0] + new_w - new_w // 2, self.center_position[1])
 
         start = left[0], top[-1]
 
