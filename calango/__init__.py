@@ -25,4 +25,5 @@ from ._version import VERSION, __version__
 from . import settings
 from .devices import Mouse
 from .media import Image, VideoWriter, Video
+from ._video_reader import read_video_frames
 from .recorder import ScreenRecorder

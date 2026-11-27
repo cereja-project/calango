@@ -75,6 +75,28 @@ image.prune()  # resize image to square size by min(width, height)
 ```
 
 ## Video API
+### Read a local MP4 frame by frame
+```python
+from calango import read_video_frames
+
+with read_video_frames("clip.mp4", crop=(120, 160)) as frames:
+    for index, rgb in frames:
+        print(index, rgb.shape)  # 0, (120, 160, 3) for the first frame
+        break
+```
+
+Available in the development branch. Pass a string path or `pathlib.Path`.
+Each result contains a zero-based frame index (not a timestamp) and an
+independent contiguous RGB `uint8` NumPy array. Omit `crop` for full-size
+frames. A crop is specified as `(height, width)` and never resizes the
+image. Frames follow the installed decoder's orientation handling.
+The video closes when you leave the `with` block, including after an early
+break or an exception. A missing file raises `FileNotFoundError`; an
+unopenable file or one without a decodable first frame raises `OSError`.
+Invalid crops raise `ValueError`. Once decoding has started, an unsuccessful
+read ends iteration because the decoder cannot always distinguish a read
+failure from end of stream.
+
 ### Video Writer
 ```python
 from calango import VideoWriter
