@@ -36,6 +36,11 @@ jobs:
         python -m unittest tests
     - name: Build distribution
       run: python -m build
+    - name: Verify video reader from the installed wheel
+      run: |
+        python -c "from pathlib import Path; import subprocess, sys; wheel, = Path('dist').glob('*.whl'); subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--no-deps', '--force-reinstall', str(wheel)])"
+        python -I -c "from pathlib import Path; import calango; assert not Path(calango.__file__).resolve().is_relative_to(Path('calango').resolve()), calango.__file__"
+        python -I -m unittest discover -s tests -p test_video_reader.py
     - name: Check recorder entrypoint without a display
       run: calango-recorder --help
     - name: Check module entrypoint without a display
